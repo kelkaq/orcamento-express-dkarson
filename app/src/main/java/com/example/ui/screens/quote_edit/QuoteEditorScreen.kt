@@ -63,6 +63,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -100,6 +102,8 @@ fun QuoteEditorScreen(
     var clientSearch by remember { mutableStateOf("") }
     var catalogSearch by remember { mutableStateOf("") }
     var applyCalculatorResult by remember { mutableStateOf<((Double) -> Unit)?>(null) }
+    var showStandaloneCalculator by remember { mutableStateOf(false) }
+    val clipboard = LocalClipboardManager.current
 
     BackHandler {
         onNavigateBack()
@@ -375,6 +379,19 @@ fun QuoteEditorScreen(
                             Text("Item", fontSize = 12.sp)
                         }
                     }
+                }
+            }
+
+            // Calculadora principal, sempre visível no fluxo de orçamento.
+            item {
+                OutlinedButton(
+                    onClick = { showStandaloneCalculator = true },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
+                        .testTag("btn_calculator_visible")
+                ) {
+                    Icon(Icons.Default.Calculate, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Abrir calculadora rápida")
                 }
             }
 
@@ -706,6 +723,19 @@ fun QuoteEditorScreen(
         }
     }
 
+    if (showStandaloneCalculator) {
+        CalculatorDialog(
+            onDismiss = { showStandaloneCalculator = false },
+            confirmLabel = "Copiar resultado",
+            onUseResult = { amount ->
+                val formatted = java.math.BigDecimal.valueOf(amount)
+                    .stripTrailingZeros().toPlainString().replace('.', ',')
+                clipboard.setText(AnnotatedString(formatted))
+                showStandaloneCalculator = false
+            }
+        )
+    }
+
     if (applyCalculatorResult != null) {
         CalculatorDialog(
             onDismiss = { applyCalculatorResult = null },
@@ -790,6 +820,17 @@ fun QuoteItemRowCard(
             }
 
             Spacer(modifier = Modifier.height(8.dp))
+
+            OutlinedButton(
+                onClick = {
+                    onOpenCalculator { price -> onUpdateItem(item.copy(unitPrice = price)) }
+                },
+                modifier = Modifier.fillMaxWidth().testTag("item_calculator_${index}")
+            ) {
+                Icon(Icons.Default.Calculate, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Calcular preço deste item")
+            }
 
             // Subtotal of this item
             Row(
