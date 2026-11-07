@@ -12,6 +12,8 @@ import android.graphics.pdf.PdfDocument
 import androidx.core.content.FileProvider
 import com.example.data.entity.CompanyProfileEntity
 import com.example.data.entity.QuoteItemEntity
+import com.example.data.entity.QuoteEntity
+import com.example.data.entity.PaymentEntity
 import com.example.data.entity.QuoteWithItems
 import java.io.File
 import java.io.FileOutputStream
@@ -619,6 +621,116 @@ object PdfGenerator {
             lines.add(currentLine.toString())
         }
         return lines.ifEmpty { listOf(text) }
+    }
+
+    /**
+     * Recibo de um recebimento real lançado pelo usuário.
+     * Cada pagamento (inclusive parcial) possui seu próprio número de recibo.
+     * O documento é comercial, não nota fiscal nem comprovante bancário.
+     */
+    fun generateReceiptPdf(
+        context: Context,
+        quote: QuoteEntity,
+        payment: PaymentEntity,
+        company: CompanyProfileEntity
+    ): File {
+        require(payment.quoteId == quote.id && payment.id > 0 && payment.amountCents > 0) {
+            "Recebimento inválido para este orçamento."
+        }
+        val doc = PdfDocument()
+        try {
+            val page = doc.startPage(PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, 1).create())
+            val canvas = page.canvas
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+            val left = 42f
+            val right = 553f
+            val ptBr = Locale.forLanguageTag("pt-BR")
+            val dateText = SimpleDateFormat("dd/MM/yyyy", ptBr).format(Date(payment.paidAt))
+            val issueText = SimpleDateFormat("dd/MM/yyyy HH:mm", ptBr).format(Date())
+            val issuer = company.tradeName.ifBlank { company.legalName.ifBlank { "Prestador de serviço" } }
+            val amount = Formatters.formatCurrency(payment.amountCents.toDouble() / 100.0)
+
+            paint.color = primaryDark
+            canvas.drawRect(0f, 0f, PAGE_WIDTH.toFloat(), 12f, paint)
+            paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            paint.textSize = 22f
+            canvas.drawText("RECIBO DE PAGAMENTO", left, 78f, paint)
+
+            paint.textSize = 11f
+            paint.color = textSecondary
+            canvas.drawText("Recibo Nº REC-${quote.id}-${payment.id}", left, 102f, paint)
+            canvas.drawText("Referente ao orçamento ${quote.quoteNumber}", left, 120f, paint)
+
+            paint.color = softCardBg
+            canvas.drawRoundRect(RectF(left, 145f, right, 233f), 12f, 12f, paint)
+            paint.textAlign = Paint.Align.CENTER
+            paint.color = textSecondary
+            paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+            paint.textSize = 12f
+            canvas.drawText("VALOR RECEBIDO", PAGE_WIDTH / 2f, 176f, paint)
+            paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            paint.textSize = 26f
+            paint.color = primaryEmerald
+            canvas.drawText(amount, PAGE_WIDTH / 2f, 211f, paint)
+            paint.textAlign = Paint.Align.LEFT
+
+            fun labelValue(label: String, value: String, y: Float): Float {
+                paint.textSize = 10f
+                paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                paint.color = textSecondary
+                canvas.drawText(label, left, y, paint)
+                paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+                paint.color = textPrimary
+                paint.textSize = 11f
+                val safeValue = value.ifBlank { "Não informado" }
+                val lines = breakTextIntoLines(safeValue, right - left, paint).take(3)
+                lines.forEachIndexed { index, line ->
+                    canvas.drawText(line, left, y + 19f + index * 15f, paint)
+                }
+                return y + 39f + (lines.size - 1) * 15f
+            }
+
+            var y = 273f
+            y = labelValue("RECEBIDO DE", quote.clientName, y)
+            if (quote.clientDocument.isNotBlank()) {
+                y = labelValue("CPF / CNPJ DO PAGADOR", Formatters.formatDocument(quote.clientDocument), y)
+            }
+            y = labelValue("RECEBIDO POR", issuer, y)
+            if (company.document.isNotBlank()) {
+                y = labelValue("CPF / CNPJ DO EMISSOR", Formatters.formatDocument(company.document), y)
+            }
+            y = labelValue("DATA DO RECEBIMENTO", dateText, y)
+            y = labelValue("FORMA DE PAGAMENTO", payment.method, y)
+            if (payment.notes.isNotBlank()) y = labelValue("OBSERVAÇÕES", payment.notes, y)
+
+            // Assinatura manual do emissor; o app não alega ter assinado eletronicamente.
+            val sigY = maxOf(685f, y + 40f).coerceAtMost(736f)
+            paint.color = borderLight
+            paint.strokeWidth = 1.3f
+            canvas.drawLine(130f, sigY, 466f, sigY, paint)
+            paint.color = textPrimary
+            paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+            paint.textSize = 10f
+            paint.textAlign = Paint.Align.CENTER
+            canvas.drawText(issuer.take(60), PAGE_WIDTH / 2f, sigY + 17f, paint)
+            canvas.drawText("Assinatura do recebedor", PAGE_WIDTH / 2f, sigY + 31f, paint)
+            paint.textAlign = Paint.Align.LEFT
+
+            paint.color = borderLight
+            canvas.drawLine(left, 787f, right, 787f, paint)
+            paint.color = textSecondary
+            paint.textSize = 8.5f
+            canvas.drawText("Recibo comercial não fiscal. Recebimento informado pelo emissor.", left, 803f, paint)
+            canvas.drawText("Gerado em ${issueText} • Orçamento Express", left, 817f, paint)
+
+            doc.finishPage(page)
+            val directory = File(context.cacheDir, "docs").apply { mkdirs() }
+            val file = File(directory, "recibo_${quote.id}_${payment.id}.pdf")
+            FileOutputStream(file).use { doc.writeTo(it) }
+            return file
+        } finally {
+            doc.close()
+        }
     }
 
     fun getFileUri(context: Context, file: File): android.net.Uri {
