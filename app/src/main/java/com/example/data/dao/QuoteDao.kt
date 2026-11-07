@@ -64,16 +64,6 @@ interface QuoteDao {
     @Query("UPDATE quotes SET status = :newStatus, updatedAt = :updatedAt WHERE id = :quoteId")
     suspend fun updateStatus(quoteId: Long, newStatus: String, updatedAt: Long = System.currentTimeMillis())
 
-    /** O Room emite um novo resumo a cada alteração na tabela de orçamentos. */
-    @Query("""
-        SELECT COUNT(*) AS totalQuotes,
-               COALESCE(SUM(CASE WHEN status = 'PENDING' THEN 1 ELSE 0 END), 0) AS pendingCount,
-               COALESCE(SUM(CASE WHEN status IN ('APPROVED', 'COMPLETED') THEN 1 ELSE 0 END), 0) AS approvedCount,
-               COALESCE(SUM(CASE WHEN status IN ('APPROVED', 'COMPLETED') THEN total ELSE 0 END), 0) AS totalApprovedRevenue
-        FROM quotes
-    """)
-    fun observeDashboardMetrics(): Flow<com.example.data.repository.DashboardMetrics>
-
     @Query("SELECT COUNT(*) FROM quotes")
     suspend fun countQuotes(): Int
 
