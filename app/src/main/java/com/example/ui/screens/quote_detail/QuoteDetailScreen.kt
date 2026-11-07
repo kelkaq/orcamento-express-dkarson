@@ -222,9 +222,13 @@ fun QuoteDetailScreen(
                                     selected = quote.status == s.code,
                                     onClick = {
                                         scope.launch {
-                                            repository.updateQuoteStatus(quote.id, s.code)
-                                            quoteWithItems = repository.getQuoteWithItems(quote.id)
-                                            snackbarHostState.showSnackbar("Status atualizado para ${s.label}!")
+                                            try {
+                                                repository.updateQuoteStatus(quote.id, s.code)
+                                                quoteWithItems = repository.getQuoteWithItems(quote.id)
+                                                snackbarHostState.showSnackbar("Status atualizado para ${s.label}!")
+                                            } catch (e: Exception) {
+                                                snackbarHostState.showSnackbar(e.localizedMessage ?: "Não é possível alterar o status.")
+                                            }
                                         }
                                     },
                                     label = { Text(s.label, fontSize = 11.sp) },
@@ -653,9 +657,14 @@ fun QuoteDetailScreen(
                     onClick = {
                         quoteWithItems?.quote?.let { q ->
                             scope.launch {
-                                repository.deleteQuote(q)
-                                showDeleteConfirm = false
-                                onNavigateBack()
+                                try {
+                                    repository.deleteQuote(q)
+                                    showDeleteConfirm = false
+                                    onNavigateBack()
+                                } catch (e: Exception) {
+                                    showDeleteConfirm = false
+                                    snackbarHostState.showSnackbar(e.localizedMessage ?: "Não é possível excluir o orçamento.")
+                                }
                             }
                         }
                     },
