@@ -9,6 +9,7 @@ import androidx.core.content.FileProvider
 import com.example.data.entity.ClientEntity
 import com.example.data.entity.CompanyProfileEntity
 import com.example.data.entity.ProductServiceEntity
+import com.example.data.entity.PaymentEntity
 import com.example.data.entity.QuoteEntity
 import com.example.data.entity.QuoteItemEntity
 import com.example.data.repository.QuoteRepository
@@ -53,7 +54,7 @@ object BackupManager {
         val snapshot = repository.getDatabaseRawData()
         val root = JSONObject()
         root.put("app", "Orçamento Express")
-        root.put("version", 1)
+        root.put("version", 2)
         root.put("exportDate", System.currentTimeMillis())
         root.put("device", "${Build.MANUFACTURER} ${Build.MODEL}")
         root.put("isPreventive", isPreventive)
@@ -64,6 +65,7 @@ object BackupManager {
             put("products", snapshot.products.size)
             put("quotes", snapshot.quotes.size)
             put("items", snapshot.items.size)
+            put("payments", snapshot.payments.size)
         }
         root.put("counts", countsJson)
 
@@ -177,6 +179,21 @@ object BackupManager {
         }
         root.put("items", itemsArr)
 
+        // Recebimentos confirmados e seus recibos acompanham os demais dados.
+        val paymentsArr = JSONArray()
+        snapshot.payments.forEach { payment ->
+            paymentsArr.put(JSONObject().apply {
+                put("id", payment.id)
+                put("quoteId", payment.quoteId)
+                put("amountCents", payment.amountCents)
+                put("paidAt", payment.paidAt)
+                put("method", payment.method)
+                put("notes", payment.notes)
+                put("createdAt", payment.createdAt)
+            })
+        }
+        root.put("payments", paymentsArr)
+
         // Save file
         val targetDir = if (isPreventive) {
             File(context.filesDir, "preventive_backups").apply { mkdirs() }
@@ -214,8 +231,12 @@ object BackupManager {
                 return BackupValidationResult(isValid = false, errorMessage = "Arquivo incompatível com o Orçamento Express.")
             }
 
-            if (root.optInt("version", -1) != 1) {
+            val backupVersion = root.optInt("version", -1)
+            if (backupVersion !in 1..2) {
                 return BackupValidationResult(isValid = false, errorMessage = "Versão de backup incompatível.")
+            }
+            if (backupVersion == 2 && root.optJSONArray("payments") == null) {
+                return BackupValidationResult(isValid = false, errorMessage = "Backup incompleto: faltam os recebimentos.")
             }
             // Falhar de forma segura: arrays ausentes não devem ser tratados como listas vazias.
             if (listOf("clients", "products", "quotes", "items").any { root.optJSONArray(it) == null }) {
@@ -232,6 +253,7 @@ object BackupManager {
             val prodArr = root.getJSONArray("products")
             val quotesArr = root.getJSONArray("quotes")
             val itemsArr = root.getJSONArray("items")
+            val paymentsArr = root.optJSONArray("payments") ?: JSONArray()
 
             fun hasUniquePositiveIds(array: JSONArray): Boolean {
                 val ids = mutableSetOf<Long>()
@@ -242,7 +264,8 @@ object BackupManager {
                 return true
             }
             if (!hasUniquePositiveIds(clientsArr) || !hasUniquePositiveIds(prodArr) ||
-                !hasUniquePositiveIds(quotesArr) || !hasUniquePositiveIds(itemsArr)) {
+                !hasUniquePositiveIds(quotesArr) || !hasUniquePositiveIds(itemsArr) ||
+                !hasUniquePositiveIds(paymentsArr)) {
                 return BackupValidationResult(
                     isValid = false,
                     errorMessage = "Backup inválido: registros com identificadores duplicados ou ausentes."
@@ -265,6 +288,17 @@ object BackupManager {
                         )
                     }
                 }
+
+            for (i in 0 until paymentsArr.length()) {
+                val payment = paymentsArr.getJSONObject(i)
+                val parentId = payment.optLong("quoteId", -1L)
+                if (!quoteIds.contains(parentId) || payment.optLong("amountCents", 0L) <= 0L) {
+                    return BackupValidationResult(
+                        isValid = false,
+                        errorMessage = "Recebimento #$i inválido ou vinculado a orçamento inexistente."
+                    )
+                }
+            }
 
             BackupValidationResult(
                 isValid = true,
@@ -459,6 +493,23 @@ object BackupManager {
                 }
             }
 
+            // O formato anterior de backup (v1) não tinha recebimentos.
+            val payments = mutableListOf<PaymentEntity>()
+            root.optJSONArray("payments")?.let { paymentArray ->
+                for (i in 0 until paymentArray.length()) {
+                    val p = paymentArray.getJSONObject(i)
+                    payments.add(PaymentEntity(
+                        id = p.getLong("id"),
+                        quoteId = p.getLong("quoteId"),
+                        amountCents = p.getLong("amountCents"),
+                        paidAt = p.getLong("paidAt"),
+                        method = p.getString("method"),
+                        notes = p.optString("notes", ""),
+                        createdAt = p.optLong("createdAt", System.currentTimeMillis())
+                    ))
+                }
+            }
+
             // Step 8: Execute transactional atomic restore in Room
             repository.restoreDatabaseRawData(
                 profile = profile,
@@ -466,7 +517,8 @@ object BackupManager {
                 items = items,
                 clients = clients,
                 products = products,
-                replaceExisting = replaceExisting
+                replaceExisting = replaceExisting,
+                payments = payments
             )
 
             RestoreResult(
