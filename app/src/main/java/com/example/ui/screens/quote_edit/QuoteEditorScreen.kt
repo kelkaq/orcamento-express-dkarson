@@ -1,6 +1,14 @@
 package com.example.ui.screens.quote_edit
 
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.app.Activity
+import android.content.Intent
+import android.provider.ContactsContract
+import android.speech.RecognizerIntent
+import androidx.compose.ui.platform.LocalContext
+import java.util.Locale
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -95,15 +103,53 @@ fun QuoteEditorScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val availableClients by viewModel.availableClients.collectAsStateWithLifecycle()
     val availableCatalog by viewModel.availableCatalog.collectAsStateWithLifecycle()
+    val availableTemplates by viewModel.availableTemplates.collectAsStateWithLifecycle()
+    val context = LocalContext.current
 
     val snackbarHostState = remember { SnackbarHostState() }
     var showClientPickerSheet by remember { mutableStateOf(false) }
     var showCatalogPickerSheet by remember { mutableStateOf(false) }
+    var showTemplatePickerSheet by remember { mutableStateOf(false) }
     var clientSearch by remember { mutableStateOf("") }
     var catalogSearch by remember { mutableStateOf("") }
     var applyCalculatorResult by remember { mutableStateOf<((Double) -> Unit)?>(null) }
     var showStandaloneCalculator by remember { mutableStateOf(false) }
     val clipboard = LocalClipboardManager.current
+    val voiceLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val words = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+                ?.firstOrNull()?.trim().orEmpty()
+            if (words.isNotEmpty()) viewModel.onNotesChanged(
+                listOf(uiState.notes.trim(), words).filter { it.isNotBlank() }.joinToString(" ")
+            )
+        }
+    }
+    val contactLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val selected = result.data?.data
+        if (result.resultCode == Activity.RESULT_OK && selected != null) {
+            runCatching {
+                context.contentResolver.query(
+                    selected,
+                    arrayOf(
+                        ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                        ContactsContract.CommonDataKinds.Phone.NUMBER
+                    ), null, null, null
+                )?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val nameIndex = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
+                        val phoneIndex = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
+                        val name = if (nameIndex >= 0) cursor.getString(nameIndex).orEmpty() else ""
+                        val phone = if (phoneIndex >= 0) cursor.getString(phoneIndex).orEmpty() else ""
+                        viewModel.onContactImported(name, phone)
+                    }
+                }
+            }
+        }
+    }
 
     BackHandler {
         onNavigateBack()
@@ -252,6 +298,17 @@ fun QuoteEditorScreen(
                 }
             }
 
+            if (uiState.draftRecovered) {
+                item {
+                    Text(
+                        "Rascunho anterior recuperado automaticamente",
+                        color = EmeraldAccent,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 5.dp)
+                    )
+                }
+            }
+
             // Client Section
             item {
                 Card(
@@ -276,6 +333,21 @@ fun QuoteEditorScreen(
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text("Selecionar Cliente", fontSize = 12.sp)
                             }
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                try {
+                                    contactLauncher.launch(
+                                        Intent(Intent.ACTION_PICK, ContactsContract.CommonDataKinds.Phone.CONTENT_URI)
+                                    )
+                                } catch (_: Exception) { }
+                            },
+                            modifier = Modifier.fillMaxWidth().testTag("pick_android_contact")
+                        ) {
+                            Icon(Icons.Default.Person, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Importar nome e telefone de um contato")
                         }
 
                         Spacer(modifier = Modifier.height(8.dp))
@@ -393,6 +465,14 @@ fun QuoteEditorScreen(
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("Abrir calculadora rápida")
                 }
+            }
+
+            item {
+                OutlinedButton(
+                    onClick = { showTemplatePickerSheet = true },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
+                        .testTag("open_quote_templates")
+                ) { Text("Utilizar modelo pronto (itens e condições)") }
             }
 
             // Items List
@@ -568,6 +648,17 @@ fun QuoteEditorScreen(
                             maxLines = 4,
                             modifier = Modifier.fillMaxWidth()
                         )
+                        OutlinedButton(
+                            onClick = {
+                                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, "pt-BR")
+                                    putExtra(RecognizerIntent.EXTRA_PROMPT, "Fale a descrição ou observação")
+                                }
+                                runCatching { voiceLauncher.launch(intent) }
+                            },
+                            modifier = Modifier.fillMaxWidth().testTag("voice_notes_button")
+                        ) { Text("Ditar observações por voz") }
                     }
                 }
             }
@@ -590,6 +681,39 @@ fun QuoteEditorScreen(
                     }
                     Spacer(modifier = Modifier.height(32.dp))
                 }
+            }
+        }
+    }
+
+    // Modelos criados a partir de propostas reais; sem preços fictícios.
+    if (showTemplatePickerSheet) {
+        val sheetState = rememberModalBottomSheetState()
+        ModalBottomSheet(
+            onDismissRequest = { showTemplatePickerSheet = false },
+            sheetState = sheetState
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("Modelos de orçamento", fontWeight = FontWeight.Bold, color = NavyPrimary)
+                Spacer(modifier = Modifier.height(8.dp))
+                if (availableTemplates.isEmpty()) {
+                    Text("Nenhum modelo salvo. Abra um orçamento pronto e use Salvar como modelo.", color = SlateMuted)
+                } else {
+                    LazyColumn(modifier = Modifier.height(300.dp)) {
+                        items(availableTemplates.size) { i ->
+                            val template = availableTemplates[i]
+                            OutlinedButton(
+                                onClick = {
+                                    viewModel.applyTemplate(template)
+                                    showTemplatePickerSheet = false
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(template.title)
+                            }
+                        }
+                    }
+                }
+                TextButton(onClick = { showTemplatePickerSheet = false }) { Text("Fechar") }
             }
         }
     }

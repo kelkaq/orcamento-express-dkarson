@@ -24,6 +24,9 @@ interface PaymentDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insert(payment: PaymentEntity): Long
 
+    @Query("SELECT * FROM payments ORDER BY paidAt DESC")
+    fun observeAll(): Flow<List<PaymentEntity>>
+
     @Query("SELECT * FROM payments ORDER BY id")
     suspend fun getAllRaw(): List<PaymentEntity>
 

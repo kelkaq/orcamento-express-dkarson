@@ -50,6 +50,7 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -61,6 +62,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -110,6 +112,15 @@ fun QuotesScreen(
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
     val selectedStatus by viewModel.selectedStatus.collectAsStateWithLifecycle()
     val metrics by viewModel.metrics.collectAsStateWithLifecycle()
+    val paidQuoteIds by viewModel.paidQuoteIds.collectAsStateWithLifecycle()
+    val selectedPeriod by viewModel.period.collectAsStateWithLifecycle()
+    val operationError by viewModel.operationError.collectAsStateWithLifecycle()
+    LaunchedEffect(operationError) {
+        operationError?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.clearOperationError()
+        }
+    }
     val companyProfile by companyViewModel.companyProfile.collectAsStateWithLifecycle()
 
     var quoteToDelete by remember { mutableStateOf<QuoteEntity?>(null) }
@@ -159,10 +170,9 @@ fun QuotesScreen(
         ) {
             // Metrics Banner
             DashboardMetricsBanner(
-                totalCount = metrics.totalQuotes,
-                pendingCount = metrics.pendingCount,
-                approvedCount = metrics.approvedCount,
-                approvedRevenue = metrics.totalApprovedRevenue
+                metrics = metrics,
+                selectedPeriod = selectedPeriod,
+                onPeriodChange = viewModel::onPeriodChanged
             )
 
             // Search & Filters
@@ -234,6 +244,7 @@ fun QuotesScreen(
                     items(quotes, key = { it.quote.id }) { quoteWithItems ->
                         QuoteCard(
                             quoteWithItems = quoteWithItems,
+                            hasPayments = paidQuoteIds.contains(quoteWithItems.quote.id),
                             onCardClick = { onViewDetail(quoteWithItems.quote.id) },
                             onEdit = { onEditQuote(quoteWithItems.quote.id) },
                             onDuplicate = {
@@ -334,10 +345,9 @@ fun QuotesScreen(
 
 @Composable
 fun DashboardMetricsBanner(
-    totalCount: Int,
-    pendingCount: Int,
-    approvedCount: Int,
-    approvedRevenue: Double
+    metrics: com.example.data.repository.DashboardMetrics,
+    selectedPeriod: String,
+    onPeriodChange: (String) -> Unit
 ) {
     Card(
         shape = RoundedCornerShape(16.dp),
@@ -348,16 +358,69 @@ fun DashboardMetricsBanner(
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                text = "Valor de propostas aprovadas e concluídas",
+                text = "Propostas aprovadas e concluídas (por data de emissão)",
                 fontSize = 12.sp,
                 color = Color.White.copy(alpha = 0.7f)
             )
             Text(
-                text = Formatters.formatCurrency(approvedRevenue),
+                text = Formatters.formatCurrency(metrics.totalApprovedRevenue),
                 fontSize = 24.sp,
                 fontWeight = FontWeight.Bold,
                 color = EmeraldAccent
             )
+
+            Spacer(modifier = Modifier.height(10.dp))
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                items(listOf(
+                    "ALL" to "Todos", "MONTH" to "Este mês",
+                    "LAST_MONTH" to "Mês anterior", "YEAR" to "Este ano"
+                )) { (code, label) ->
+                    FilterChip(
+                        selected = selectedPeriod == code,
+                        onClick = { onPeriodChange(code) },
+                        label = { Text(label, fontSize = 10.sp) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = EmeraldAccent,
+                            selectedLabelColor = Color.White
+                        )
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Text("Recebido no período: ${Formatters.formatCurrency(metrics.totalReceived)}",
+                color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+            Text("Saldo a receber das propostas do período: ${Formatters.formatCurrency(metrics.totalReceivable)}",
+                color = Color.White, fontSize = 12.sp)
+            Text("Propostas pendentes: ${Formatters.formatCurrency(metrics.pendingValue)}",
+                color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
+            Spacer(modifier = Modifier.height(9.dp))
+            val scale = maxOf(1.0, metrics.totalApprovedRevenue, metrics.totalReceived, metrics.totalReceivable)
+            listOf(
+                "Aprovado" to metrics.totalApprovedRevenue,
+                "Recebido" to metrics.totalReceived,
+                "A receber" to metrics.totalReceivable
+            ).forEach { (label, value) ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(label, color = Color.White.copy(alpha = 0.8f), fontSize = 11.sp)
+                    Text(Formatters.formatCurrency(value), color = Color.White, fontSize = 11.sp)
+                }
+                LinearProgressIndicator(
+                    progress = { (value / scale).toFloat().coerceIn(0f, 1f) },
+                    modifier = Modifier.fillMaxWidth().height(6.dp),
+                    color = EmeraldAccent,
+                    trackColor = Color.White.copy(alpha = 0.15f)
+                )
+                Spacer(modifier = Modifier.height(7.dp))
+            }
+            if (metrics.overdueCount > 0) {
+                Text("${metrics.overdueCount} proposta(s) vencida(s) aguardando retorno.",
+                    color = Color.Yellow, fontSize = 12.sp)
+            }
+            Text("As propostas usam a data de emissão; os recebimentos usam a data informada no pagamento.",
+                fontSize = 10.sp, color = Color.White.copy(alpha = 0.6f))
 
             Spacer(modifier = Modifier.height(12.dp))
 
@@ -365,9 +428,9 @@ fun DashboardMetricsBanner(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                MetricItem(label = "Total", value = "$totalCount")
-                MetricItem(label = "Pendentes", value = "$pendingCount")
-                MetricItem(label = "Aprov./Concl.", value = "$approvedCount")
+                MetricItem(label = "Total", value = "${metrics.totalQuotes}")
+                MetricItem(label = "Pendentes", value = "${metrics.pendingCount}")
+                MetricItem(label = "Aprov./Concl.", value = "${metrics.approvedCount}")
             }
         }
     }
@@ -384,6 +447,7 @@ private fun MetricItem(label: String, value: String) {
 @Composable
 fun QuoteCard(
     quoteWithItems: QuoteWithItems,
+    hasPayments: Boolean = false,
     onCardClick: () -> Unit,
     onEdit: () -> Unit,
     onDuplicate: () -> Unit,
@@ -440,6 +504,7 @@ fun QuoteCard(
                         DropdownMenuItem(
                             text = { Text("Editar Orçamento") },
                             leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                            enabled = !hasPayments,
                             onClick = { menuExpanded = false; onEdit() }
                         )
                         DropdownMenuItem(
@@ -460,12 +525,17 @@ fun QuoteCard(
                         DropdownMenuItem(
                             text = { Text("Excluir", color = MaterialTheme.colorScheme.error) },
                             leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+                            enabled = !hasPayments,
                             onClick = { menuExpanded = false; onDelete() }
                         )
                     }
                 }
             }
 
+            if (hasPayments) {
+                Text("Recebimentos registrados • abrir para ver recibos",
+                    color = EmeraldAccent, fontSize = 11.sp)
+            }
             Spacer(modifier = Modifier.height(8.dp))
 
             // Client Name & Contact

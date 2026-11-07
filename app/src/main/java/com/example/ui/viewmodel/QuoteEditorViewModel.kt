@@ -8,12 +8,17 @@ import com.example.data.entity.CompanyProfileEntity
 import com.example.data.entity.ProductServiceEntity
 import com.example.data.entity.QuoteEntity
 import com.example.data.entity.QuoteItemEntity
+import com.example.data.entity.QuoteTemplateEntity
+import com.example.util.QuoteDraftSerializer
+import org.json.JSONArray
 import com.example.data.entity.QuoteWithItems
 import com.example.data.repository.QuoteRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.util.Calendar
@@ -43,9 +48,11 @@ data class QuoteEditorUiState(
     val isSaving: Boolean = false,
     val errorMessage: String? = null,
     val isSavedSuccess: Boolean = false,
+    val draftRecovered: Boolean = false,
     val savedQuoteId: Long? = null
 )
 
+@OptIn(kotlinx.coroutines.FlowPreview::class)
 class QuoteEditorViewModel(
     private val repository: QuoteRepository,
     private val initialQuoteId: Long?
@@ -59,13 +66,30 @@ class QuoteEditorViewModel(
 
     val availableCatalog: StateFlow<List<ProductServiceEntity>> = repository.allProductsServices
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val availableTemplates: StateFlow<List<QuoteTemplateEntity>> = repository.templates
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    private val draftKey = if (initialQuoteId != null && initialQuoteId > 0L)
+        "edit_${initialQuoteId}" else "new"
 
     init {
-        loadInitialData()
+        viewModelScope.launch {
+            loadInitialData()
+            repository.loadDraft(draftKey)?.let { json ->
+                runCatching { QuoteDraftSerializer.decode(json, _uiState.value) }
+                    .onSuccess { restored -> _uiState.value = restored }
+            }
+            recalculateTotals()
+            // Coalesce rapid typing; preserve unfinished quote and avoid saving after final submit.
+            _uiState.debounce(850).collectLatest { state ->
+                if (!state.isSavedSuccess) {
+                    repository.saveDraft(draftKey, QuoteDraftSerializer.encode(state))
+                }
+            }
+        }
     }
 
-    private fun loadInitialData() {
-        viewModelScope.launch {
+    private suspend fun loadInitialData() {
             val company = repository.getCompanyProfile()
             if (initialQuoteId != null && initialQuoteId > 0) {
                 val existing = repository.getQuoteWithItems(initialQuoteId)
@@ -92,7 +116,7 @@ class QuoteEditorViewModel(
                         notes = q.notes
                     )
                     recalculateTotals()
-                    return@launch
+                    return
                 }
             }
 
@@ -120,7 +144,41 @@ class QuoteEditorViewModel(
                 )
             )
             recalculateTotals()
+    }
+
+    fun onContactImported(name: String, phone: String) {
+        _uiState.value = _uiState.value.copy(
+            clientId = null,
+            clientName = name.ifBlank { _uiState.value.clientName },
+            clientPhone = phone.ifBlank { _uiState.value.clientPhone }
+        )
+    }
+
+    fun applyTemplate(template: QuoteTemplateEntity) {
+        val arr = runCatching { JSONArray(template.itemsJson) }.getOrNull() ?: return
+        val items = mutableListOf<QuoteItemEntity>()
+        for (i in 0 until arr.length()) {
+            val row = arr.optJSONObject(i) ?: continue
+            val quantity = row.optDouble("quantity", 1.0).coerceAtLeast(0.01)
+            val price = row.optDouble("unitPrice", 0.0).coerceAtLeast(0.0)
+            items.add(QuoteItemEntity(
+                quoteId = _uiState.value.quoteId,
+                description = row.optString("description", ""),
+                type = row.optString("type", "SERVICE"),
+                unit = row.optString("unit", "un"),
+                quantity = quantity,
+                unitPrice = price,
+                totalPrice = com.example.util.FinancialCalculator.calculateItemTotal(quantity, price)
+            ))
         }
+        if (items.isEmpty()) return
+        _uiState.value = _uiState.value.copy(
+            items = items,
+            paymentTerms = template.paymentTerms,
+            paymentMethod = template.paymentMethod,
+            notes = template.notes
+        )
+        recalculateTotals()
     }
 
     fun onClientSelected(client: ClientEntity) {
@@ -337,6 +395,7 @@ class QuoteEditorViewModel(
                 )
 
                 val savedId = repository.saveQuoteWithItems(quoteEntity, validItems)
+                repository.clearDraft(draftKey)
                 _uiState.value = _uiState.value.copy(
                     isSaving = false,
                     isSavedSuccess = true,

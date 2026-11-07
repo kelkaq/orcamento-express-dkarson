@@ -91,7 +91,7 @@ class ReceiptPaymentTest {
         repo.registerPayment(quoteId, 5000L, System.currentTimeMillis(), "PIX", "Pago")
         val backup = BackupManager.exportBackup(context, repo)
         val root = JSONObject(backup.readText(Charsets.UTF_8))
-        assertEquals(2, root.getInt("version"))
+        assertEquals(3, root.getInt("version"))
         assertEquals(1, root.getJSONArray("payments").length())
         assertTrue(BackupManager.validateBackup(context, Uri.fromFile(backup)).isValid)
 

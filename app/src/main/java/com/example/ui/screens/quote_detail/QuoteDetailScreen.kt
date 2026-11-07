@@ -69,6 +69,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.entity.CompanyProfileEntity
 import com.example.data.entity.PaymentEntity
+import com.example.data.entity.ServiceOrderEntity
+import com.example.util.ServiceOrderPdfGenerator
 import com.example.data.entity.QuoteWithItems
 import com.example.data.repository.QuoteRepository
 import com.example.domain.model.QuoteStatus
@@ -103,6 +105,19 @@ fun QuoteDetailScreen(
     var companyProfile by remember { mutableStateOf(CompanyProfileEntity()) }
     var isLoading by remember { mutableStateOf(true) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    var showServiceOrderDialog by remember { mutableStateOf(false) }
+    var showTemplateDialog by remember { mutableStateOf(false) }
+    var templateName by remember { mutableStateOf("") }
+    var orderResponsible by remember { mutableStateOf("") }
+    var orderDescription by remember { mutableStateOf("") }
+    var orderMaterials by remember { mutableStateOf("") }
+    var orderNotes by remember { mutableStateOf("") }
+    var orderStatus by remember { mutableStateOf("SCHEDULED") }
+    var orderScheduledAt by remember { mutableStateOf<Long?>(null) }
+    var savingOrder by remember { mutableStateOf(false) }
+    val serviceOrderFlow = remember(quoteId) { repository.observeServiceOrder(quoteId) }
+    val serviceOrder by serviceOrderFlow.collectAsStateWithLifecycle(initialValue = null)
+
     var showPaymentDialog by remember { mutableStateOf(false) }
     var paymentAmountText by remember { mutableStateOf("") }
     var paymentMethodText by remember { mutableStateOf("PIX") }
@@ -322,6 +337,75 @@ fun QuoteDetailScreen(
                         Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text("WhatsApp")
+                    }
+                }
+            }
+
+            // Orçamento convertido em serviço executável (sem receita duplicada).
+            item {
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("Ordem de Serviço e Modelos", color = NavyPrimary, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        if (serviceOrder != null) {
+                            Text("OS-${serviceOrder!!.id.toString().padStart(5, '0')} • " + when (serviceOrder!!.status) {
+                                "COMPLETED" -> "Concluída"
+                                "IN_PROGRESS" -> "Em execução"
+                                else -> "Agendada"
+                            }, fontWeight = FontWeight.SemiBold)
+                            if (serviceOrder!!.scheduledAt != null) {
+                                Text("Prevista para ${Formatters.formatDate(serviceOrder!!.scheduledAt!!)}", color = SlateMuted)
+                            }
+                        }
+                        if (quote.status in listOf("APPROVED", "COMPLETED")) {
+                            Button(
+                                onClick = {
+                                    val order = serviceOrder
+                                    orderResponsible = order?.responsible.orEmpty()
+                                    orderDescription = order?.description ?: items.joinToString("; ") { it.description }
+                                    orderMaterials = order?.materials.orEmpty()
+                                    orderNotes = order?.notes.orEmpty()
+                                    orderStatus = order?.status ?: "SCHEDULED"
+                                    orderScheduledAt = order?.scheduledAt
+                                    showServiceOrderDialog = true
+                                },
+                                modifier = Modifier.fillMaxWidth().testTag("service_order_button"),
+                                colors = ButtonDefaults.buttonColors(containerColor = NavyPrimary)
+                            ) { Text(if (serviceOrder == null) "Converter em Ordem de Serviço" else "Editar Ordem de Serviço") }
+                        }
+                        serviceOrder?.let { order ->
+                            OutlinedButton(
+                                onClick = {
+                                    scope.launch {
+                                        try {
+                                            val file = ServiceOrderPdfGenerator.generate(context, data, order, companyProfile)
+                                            val uri = PdfGenerator.getFileUri(context, file)
+                                            val intent = Intent(Intent.ACTION_SEND).apply {
+                                                type = "application/pdf"
+                                                putExtra(Intent.EXTRA_STREAM, uri)
+                                                putExtra(Intent.EXTRA_TEXT, "Segue a ordem de serviço OS-${order.id.toString().padStart(5, '0')} referente a ${quote.quoteNumber}.")
+                                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                            }
+                                            context.startActivity(Intent.createChooser(intent, "Compartilhar Ordem de Serviço"))
+                                        } catch (e: Exception) {
+                                            snackbarHostState.showSnackbar(e.localizedMessage ?: "Erro ao gerar OS.")
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth().testTag("share_service_order")
+                            ) { Text("Gerar e compartilhar OS em PDF") }
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                templateName = ""
+                                showTemplateDialog = true
+                            },
+                            modifier = Modifier.fillMaxWidth().testTag("save_as_template_button")
+                        ) { Text("Salvar este orçamento como modelo") }
                     }
                 }
             }
@@ -553,6 +637,118 @@ fun QuoteDetailScreen(
                 Spacer(modifier = Modifier.height(32.dp))
             }
         }
+    }
+
+    val orderQuote = quoteWithItems?.quote
+    if (showServiceOrderDialog && orderQuote != null) {
+        AlertDialog(
+            onDismissRequest = { if (!savingOrder) showServiceOrderDialog = false },
+            title = { Text("Ordem de Serviço") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = orderResponsible,
+                        onValueChange = { orderResponsible = it },
+                        label = { Text("Responsável") }, singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = orderDescription, onValueChange = { orderDescription = it },
+                        label = { Text("Descrição da execução") }, maxLines = 4,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = orderMaterials, onValueChange = { orderMaterials = it },
+                        label = { Text("Materiais utilizados") }, maxLines = 3,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = orderNotes, onValueChange = { orderNotes = it },
+                        label = { Text("Observações") }, maxLines = 2,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedButton(
+                        onClick = {
+                            val calendar = Calendar.getInstance().apply {
+                                timeInMillis = orderScheduledAt ?: System.currentTimeMillis()
+                            }
+                            DatePickerDialog(
+                                context,
+                                { _, year, month, day ->
+                                    orderScheduledAt = Calendar.getInstance().apply {
+                                        set(year, month, day, 12, 0, 0)
+                                        set(Calendar.MILLISECOND, 0)
+                                    }.timeInMillis
+                                },
+                                calendar.get(Calendar.YEAR), calendar.get(Calendar.MONTH),
+                                calendar.get(Calendar.DAY_OF_MONTH)
+                            ).show()
+                        }, modifier = Modifier.fillMaxWidth()
+                    ) { Text("Previsão: " + (orderScheduledAt?.let { Formatters.formatDate(it) } ?: "Selecionar data")) }
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf("SCHEDULED" to "Agendada", "IN_PROGRESS" to "Execução", "COMPLETED" to "Concluída")
+                            .forEach { (code, label) ->
+                                FilterChip(
+                                    selected = orderStatus == code, onClick = { orderStatus = code },
+                                    label = { Text(label, fontSize = 10.sp) }
+                                )
+                            }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    enabled = !savingOrder,
+                    onClick = {
+                        savingOrder = true
+                        scope.launch {
+                            try {
+                                repository.saveServiceOrder(
+                                    orderQuote.id, orderResponsible, orderDescription,
+                                    orderMaterials, orderNotes, orderScheduledAt, orderStatus
+                                )
+                                quoteWithItems = repository.getQuoteWithItems(orderQuote.id)
+                                showServiceOrderDialog = false
+                                snackbarHostState.showSnackbar("Ordem de serviço salva.")
+                            } catch (e: Exception) {
+                                snackbarHostState.showSnackbar(e.localizedMessage ?: "Erro ao salvar OS.")
+                            } finally { savingOrder = false }
+                        }
+                    }
+                ) { Text(if (savingOrder) "Salvando..." else "Salvar OS") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showServiceOrderDialog = false }, enabled = !savingOrder) { Text("Cancelar") }
+            }
+        )
+    }
+
+    if (showTemplateDialog && orderQuote != null) {
+        AlertDialog(
+            onDismissRequest = { showTemplateDialog = false },
+            title = { Text("Salvar modelo reutilizável") },
+            text = {
+                OutlinedTextField(
+                    value = templateName, onValueChange = { templateName = it },
+                    label = { Text("Nome do modelo") }, singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    scope.launch {
+                        try {
+                            repository.saveTemplateFromQuote(orderQuote.id, templateName)
+                            showTemplateDialog = false
+                            snackbarHostState.showSnackbar("Modelo salvo. Ele aparecerá no próximo orçamento.")
+                        } catch (e: Exception) {
+                            snackbarHostState.showSnackbar(e.localizedMessage ?: "Erro ao salvar modelo.")
+                        }
+                    }
+                }) { Text("Salvar modelo") }
+            },
+            dismissButton = { TextButton(onClick = { showTemplateDialog = false }) { Text("Cancelar") } }
+        )
     }
 
     val paymentDialogQuote = quoteWithItems?.quote

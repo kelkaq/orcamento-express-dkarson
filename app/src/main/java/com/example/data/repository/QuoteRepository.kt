@@ -6,6 +6,9 @@ import com.example.data.entity.ClientEntity
 import com.example.data.entity.CompanyProfileEntity
 import com.example.data.entity.ProductServiceEntity
 import com.example.data.entity.PaymentEntity
+import com.example.data.entity.ServiceOrderEntity
+import com.example.data.entity.QuoteTemplateEntity
+import com.example.data.entity.DraftQuoteEntity
 import com.example.data.entity.QuoteEntity
 import com.example.data.entity.QuoteItemEntity
 import com.example.data.entity.QuoteSequenceEntity
@@ -14,12 +17,20 @@ import kotlinx.coroutines.flow.Flow
 import java.util.Calendar
 import java.math.BigDecimal
 import java.math.RoundingMode
+import org.json.JSONArray
+import org.json.JSONObject
+import kotlinx.coroutines.flow.combine
 
 data class DashboardMetrics(
     val totalQuotes: Int = 0,
     val pendingCount: Int = 0,
     val approvedCount: Int = 0,
-    val totalApprovedRevenue: Double = 0.0
+    val totalApprovedRevenue: Double = 0.0,
+    val totalReceived: Double = 0.0,
+    val totalReceivable: Double = 0.0,
+    val pendingValue: Double = 0.0,
+    val completedCount: Int = 0,
+    val overdueCount: Int = 0
 )
 
 class QuoteRepository(private val db: AppDatabase) {
@@ -29,10 +40,87 @@ class QuoteRepository(private val db: AppDatabase) {
     private val productServiceDao = db.productServiceDao()
     private val quoteDao = db.quoteDao()
     private val paymentDao = db.paymentDao()
+    private val orderDao = db.serviceOrderDao()
+    private val templateDao = db.quoteTemplateDao()
+    private val draftDao = db.draftQuoteDao()
     private val companyProfileDao = db.companyProfileDao()
     private val sequenceDao = db.quoteSequenceDao()
 
-    val dashboardMetrics: Flow<DashboardMetrics> = quoteDao.observeDashboardMetrics()
+    val dashboardMetrics: Flow<DashboardMetrics> = dashboardMetricsByPeriod("ALL")
+
+    /**
+     * Data de emissão filtra propostas e datas reais de pagamento filtram recebimentos.
+     * Aprovação histórica sem timestamp não é atribuída artificialmente ao período.
+     */
+    fun dashboardMetricsByPeriod(period: String): Flow<DashboardMetrics> =
+        combine(quoteDao.getAllQuotesWithItems(), paymentDao.observeAll()) { quotesWithItems, payments ->
+            val calendar = Calendar.getInstance()
+            val now = System.currentTimeMillis()
+            val start: Long
+            val end: Long
+            when (period) {
+                "MONTH" -> {
+                    calendar.set(Calendar.DAY_OF_MONTH, 1)
+                    calendar.set(Calendar.HOUR_OF_DAY, 0)
+                    calendar.set(Calendar.MINUTE, 0)
+                    calendar.set(Calendar.SECOND, 0)
+                    calendar.set(Calendar.MILLISECOND, 0)
+                    start = calendar.timeInMillis
+                    calendar.add(Calendar.MONTH, 1)
+                    end = calendar.timeInMillis
+                }
+                "LAST_MONTH" -> {
+                    calendar.set(Calendar.DAY_OF_MONTH, 1)
+                    calendar.set(Calendar.HOUR_OF_DAY, 0)
+                    calendar.set(Calendar.MINUTE, 0)
+                    calendar.set(Calendar.SECOND, 0)
+                    calendar.set(Calendar.MILLISECOND, 0)
+                    end = calendar.timeInMillis
+                    calendar.add(Calendar.MONTH, -1)
+                    start = calendar.timeInMillis
+                }
+                "YEAR" -> {
+                    calendar.set(Calendar.MONTH, Calendar.JANUARY)
+                    calendar.set(Calendar.DAY_OF_MONTH, 1)
+                    calendar.set(Calendar.HOUR_OF_DAY, 0)
+                    calendar.set(Calendar.MINUTE, 0)
+                    calendar.set(Calendar.SECOND, 0)
+                    calendar.set(Calendar.MILLISECOND, 0)
+                    start = calendar.timeInMillis
+                    calendar.add(Calendar.YEAR, 1)
+                    end = calendar.timeInMillis
+                }
+                else -> {
+                    start = 0L
+                    end = Long.MAX_VALUE
+                }
+            }
+            val issued = quotesWithItems.map { it.quote }.filter { it.issueDate >= start && it.issueDate < end }
+            val approved = issued.filter { it.status == "APPROVED" || it.status == "COMPLETED" }
+            val pending = issued.filter { it.status == "PENDING" }
+            // Todas as parcelas de um orçamento são consideradas no seu saldo, não apenas as do período.
+            val paidByQuote = payments.groupBy { it.quoteId }
+                .mapValues { (_, rows) -> rows.sumOf { it.amountCents } }
+            fun cents(total: Double): Long = BigDecimal.valueOf(total)
+                .movePointRight(2).setScale(0, RoundingMode.HALF_UP).longValueExact()
+            val approvedCents = approved.sumOf { cents(it.total) }
+            val remainingCents = approved.sumOf { q ->
+                (cents(q.total) - (paidByQuote[q.id] ?: 0L)).coerceAtLeast(0L)
+            }
+            val receivedCents = payments.filter { it.paidAt >= start && it.paidAt < end }
+                .sumOf { it.amountCents }
+            DashboardMetrics(
+                totalQuotes = issued.size,
+                pendingCount = pending.size,
+                approvedCount = approved.size,
+                totalApprovedRevenue = approvedCents / 100.0,
+                totalReceived = receivedCents / 100.0,
+                totalReceivable = remainingCents / 100.0,
+                pendingValue = pending.sumOf { cents(it.total) } / 100.0,
+                completedCount = issued.count { it.status == "COMPLETED" },
+                overdueCount = pending.count { it.validUntil < now }
+            )
+        }
 
     // Quotes
     val allQuotes: Flow<List<QuoteWithItems>> = quoteDao.getAllQuotesWithItems()
@@ -65,6 +153,7 @@ class QuoteRepository(private val db: AppDatabase) {
     }
 
     suspend fun deleteQuote(quote: QuoteEntity) = db.withTransaction {
+        require(orderDao.getByQuote(quote.id) == null) { "Exclua a ordem de serviço antes de excluir o orçamento." }
         require(paymentDao.countForQuote(quote.id) == 0) {
             "Este orçamento possui recibos e recebimentos. Não pode ser excluído."
         }
@@ -72,6 +161,79 @@ class QuoteRepository(private val db: AppDatabase) {
     }
 
     fun observePayments(quoteId: Long): Flow<List<PaymentEntity>> = paymentDao.observeByQuote(quoteId)
+
+    val allPayments: Flow<List<PaymentEntity>> = paymentDao.observeAll()
+    val templates: Flow<List<QuoteTemplateEntity>> = templateDao.observeAll()
+    fun observeServiceOrder(quoteId: Long): Flow<ServiceOrderEntity?> = orderDao.observeByQuote(quoteId)
+    suspend fun getServiceOrder(quoteId: Long): ServiceOrderEntity? = orderDao.getByQuote(quoteId)
+
+    /** A OS sempre reutiliza o orçamento e não cria um segundo faturamento. */
+    suspend fun saveServiceOrder(
+        quoteId: Long,
+        responsible: String,
+        description: String,
+        materials: String,
+        notes: String,
+        scheduledAt: Long?,
+        status: String
+    ): Long = db.withTransaction {
+        require(status in listOf("SCHEDULED", "IN_PROGRESS", "COMPLETED")) { "Situação da OS inválida." }
+        val q = quoteDao.getQuoteWithItems(quoteId)?.quote ?: error("Orçamento não encontrado.")
+        require(q.status in listOf("APPROVED", "COMPLETED")) { "Aprove o orçamento para criar a OS." }
+        val old = orderDao.getByQuote(quoteId)
+        val now = System.currentTimeMillis()
+        val order = ServiceOrderEntity(
+            id = old?.id ?: 0L,
+            quoteId = quoteId,
+            status = status,
+            scheduledAt = scheduledAt,
+            completedAt = if (status == "COMPLETED") old?.completedAt ?: now else null,
+            responsible = responsible.trim(),
+            description = description.trim(),
+            materials = materials.trim(),
+            notes = notes.trim(),
+            createdAt = old?.createdAt ?: now,
+            updatedAt = now
+        )
+        val id = if (old == null) orderDao.insert(order) else {
+            orderDao.update(order)
+            old.id
+        }
+        if (status == "COMPLETED" && q.status != "COMPLETED") {
+            quoteDao.updateStatus(quoteId, "COMPLETED")
+        }
+        id
+    }
+
+    suspend fun saveTemplateFromQuote(quoteId: Long, title: String): Long = db.withTransaction {
+        require(title.trim().isNotBlank()) { "Informe o nome do modelo." }
+        val quote = quoteDao.getQuoteWithItems(quoteId) ?: error("Orçamento não encontrado.")
+        val json = JSONArray().apply {
+            quote.items.forEach { item ->
+                put(JSONObject().apply {
+                    put("description", item.description)
+                    put("type", item.type)
+                    put("unit", item.unit)
+                    put("quantity", item.quantity)
+                    put("unitPrice", item.unitPrice)
+                })
+            }
+        }
+        templateDao.insert(QuoteTemplateEntity(
+            title = title.trim().take(80),
+            itemsJson = json.toString(),
+            paymentTerms = quote.quote.paymentTerms,
+            paymentMethod = quote.quote.paymentMethod,
+            notes = quote.quote.notes
+        ))
+    }
+
+    suspend fun deleteTemplate(id: Long) = templateDao.delete(id)
+    suspend fun loadDraft(key: String): String? = draftDao.get(key)?.payloadJson
+    suspend fun saveDraft(key: String, payload: String) =
+        draftDao.upsert(DraftQuoteEntity(draftKey = key, payloadJson = payload))
+    suspend fun clearDraft(key: String) = draftDao.delete(key)
+
     suspend fun getPayments(quoteId: Long): List<PaymentEntity> = paymentDao.getByQuote(quoteId)
 
     /**
@@ -218,7 +380,10 @@ class QuoteRepository(private val db: AppDatabase) {
             items = quoteDao.getAllQuoteItemsRaw(),
             clients = clientDao.getAllClientsRaw(),
             products = productServiceDao.getAllRaw(),
-            payments = paymentDao.getAllRaw()
+            payments = paymentDao.getAllRaw(),
+            serviceOrders = orderDao.getAllRaw(),
+            templates = templateDao.getAllRaw(),
+            drafts = draftDao.getAllRaw()
         )
     }
 
@@ -229,12 +394,18 @@ class QuoteRepository(private val db: AppDatabase) {
         clients: List<ClientEntity>,
         products: List<ProductServiceEntity>,
         replaceExisting: Boolean,
-        payments: List<PaymentEntity> = emptyList()
+        payments: List<PaymentEntity> = emptyList(),
+        serviceOrders: List<ServiceOrderEntity> = emptyList(),
+        templates: List<QuoteTemplateEntity> = emptyList(),
+        drafts: List<DraftQuoteEntity> = emptyList()
     ) {
         db.withTransaction {
             if (replaceExisting) {
                 // Modo SUBSTITUIR: limpa tabelas e restaura os IDs exatamente como vieram
+                orderDao.clearAll()
                 paymentDao.clearAll()
+                templateDao.clearAll()
+                draftDao.clearAll()
                 quoteDao.clearAllQuoteItems()
                 quoteDao.clearAllQuotes()
                 clientDao.clearAllClients()
@@ -246,6 +417,9 @@ class QuoteRepository(private val db: AppDatabase) {
                 if (quotes.isNotEmpty()) quoteDao.insertQuotesRaw(quotes)
                 if (items.isNotEmpty()) quoteDao.insertQuoteItemsRaw(items)
                 if (payments.isNotEmpty()) paymentDao.insertRaw(payments)
+                if (serviceOrders.isNotEmpty()) orderDao.insertRaw(serviceOrders)
+                if (templates.isNotEmpty()) templateDao.insertRaw(templates)
+                if (drafts.isNotEmpty()) draftDao.insertRaw(drafts)
             } else {
                 // Modo MESCLAR:
                 // 1. Perfil da Empresa: preserva dados locais se já existirem; apenas preenche se vazio
@@ -364,6 +538,20 @@ class QuoteRepository(private val db: AppDatabase) {
                     payment.copy(id = 0, quoteId = newQuoteId)
                 }
                 if (remappedPayments.isNotEmpty()) paymentDao.insertRaw(remappedPayments)
+
+                val remappedOrders = serviceOrders.map { order ->
+                    val newQuoteId = quoteIdMap[order.quoteId]
+                        ?: error("Backup possui OS sem orçamento correspondente.")
+                    order.copy(id = 0, quoteId = newQuoteId)
+                }
+                if (remappedOrders.isNotEmpty()) orderDao.insertRaw(remappedOrders)
+                for (template in templates) {
+                    templateDao.insert(template.copy(id = 0))
+                }
+                // Rascunhos locais prevalecem na mesclagem; não substituir silenciosamente.
+                for (draft in drafts) {
+                    if (draftDao.get(draft.draftKey) == null) draftDao.upsert(draft)
+                }
             }
 
             // Sincronizar o contador de sequência com o maior número existente no ano
@@ -390,5 +578,8 @@ data class DatabaseBackupSnapshot(
     val items: List<QuoteItemEntity>,
     val clients: List<ClientEntity>,
     val products: List<ProductServiceEntity>,
-    val payments: List<PaymentEntity> = emptyList()
+    val payments: List<PaymentEntity> = emptyList(),
+    val serviceOrders: List<ServiceOrderEntity> = emptyList(),
+    val templates: List<QuoteTemplateEntity> = emptyList(),
+    val drafts: List<DraftQuoteEntity> = emptyList()
 )
