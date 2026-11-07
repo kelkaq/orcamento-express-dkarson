@@ -51,7 +51,8 @@ class ExampleRobolectricTest {
     fun `read string from context`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val appName = context.getString(R.string.app_name)
-        assertEquals("Orçamento Express", appName)
+        // testDebugUnitTest usa os recursos de src/debug: o nome distingue a instalação de teste.
+        assertEquals("Orçamento Express (Teste)", appName)
     }
 
     @Test
