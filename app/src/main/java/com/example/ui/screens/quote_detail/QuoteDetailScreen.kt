@@ -547,7 +547,13 @@ fun QuoteDetailScreen(
         }
     }
 
-    if (showPaymentDialog) {
+    val paymentDialogQuote = quoteWithItems?.quote
+    val dialogRemainingCents = paymentDialogQuote?.let { q ->
+        (BigDecimal.valueOf(q.total).movePointRight(2)
+            .setScale(0, RoundingMode.HALF_UP).longValueExact() -
+            payments.sumOf { it.amountCents }).coerceAtLeast(0)
+    } ?: 0L
+    if (showPaymentDialog && paymentDialogQuote != null) {
         AlertDialog(
             onDismissRequest = { if (!savingPayment) showPaymentDialog = false },
             title = { Text("Registrar recebimento") },
@@ -589,13 +595,13 @@ fun QuoteDetailScreen(
                             normalized.toBigDecimal().movePointRight(2)
                                 .setScale(0, RoundingMode.UNNECESSARY).longValueExact()
                         }.getOrNull()
-                        if (cents == null || cents <= 0L || cents > remainingCents || paymentMethodText.isBlank()) {
+                        if (cents == null || cents <= 0L || cents > dialogRemainingCents || paymentMethodText.isBlank()) {
                             scope.launch { snackbarHostState.showSnackbar("Informe um valor válido até o saldo pendente e a forma de pagamento.") }
                         } else {
                             savingPayment = true
                             scope.launch {
                                 try {
-                                    repository.registerPayment(quote.id, cents, System.currentTimeMillis(), paymentMethodText, paymentNotesText)
+                                    repository.registerPayment(paymentDialogQuote.id, cents, System.currentTimeMillis(), paymentMethodText, paymentNotesText)
                                     showPaymentDialog = false
                                     snackbarHostState.showSnackbar("Recebimento salvo. Toque em Recibo PDF para enviar ao cliente.")
                                 } catch (e: Exception) {
