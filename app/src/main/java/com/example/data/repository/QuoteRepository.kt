@@ -5,12 +5,15 @@ import com.example.data.database.AppDatabase
 import com.example.data.entity.ClientEntity
 import com.example.data.entity.CompanyProfileEntity
 import com.example.data.entity.ProductServiceEntity
+import com.example.data.entity.PaymentEntity
 import com.example.data.entity.QuoteEntity
 import com.example.data.entity.QuoteItemEntity
 import com.example.data.entity.QuoteSequenceEntity
 import com.example.data.entity.QuoteWithItems
 import kotlinx.coroutines.flow.Flow
 import java.util.Calendar
+import java.math.BigDecimal
+import java.math.RoundingMode
 
 data class DashboardMetrics(
     val totalQuotes: Int = 0,
@@ -25,6 +28,7 @@ class QuoteRepository(private val db: AppDatabase) {
     private val clientDao = db.clientDao()
     private val productServiceDao = db.productServiceDao()
     private val quoteDao = db.quoteDao()
+    private val paymentDao = db.paymentDao()
     private val companyProfileDao = db.companyProfileDao()
     private val sequenceDao = db.quoteSequenceDao()
 
@@ -46,13 +50,65 @@ class QuoteRepository(private val db: AppDatabase) {
 
     suspend fun getQuoteWithItems(id: Long): QuoteWithItems? = quoteDao.getQuoteWithItems(id)
 
-    suspend fun saveQuoteWithItems(quote: QuoteEntity, items: List<QuoteItemEntity>): Long =
+    suspend fun saveQuoteWithItems(quote: QuoteEntity, items: List<QuoteItemEntity>): Long = db.withTransaction {
+        require(quote.id <= 0 || paymentDao.countForQuote(quote.id) == 0) {
+            "Este orçamento possui recebimentos. Não é permitido alterar os valores após o pagamento."
+        }
         quoteDao.saveQuoteWithItems(quote, items)
+    }
 
-    suspend fun updateQuoteStatus(quoteId: Long, newStatus: String) =
+    suspend fun updateQuoteStatus(quoteId: Long, newStatus: String) = db.withTransaction {
+        require(paymentDao.countForQuote(quoteId) == 0 || newStatus in setOf("APPROVED", "COMPLETED")) {
+            "Há recebimentos registrados. Não é possível voltar este orçamento a pendente ou cancelado."
+        }
         quoteDao.updateStatus(quoteId, newStatus)
+    }
 
-    suspend fun deleteQuote(quote: QuoteEntity) = quoteDao.deleteQuote(quote)
+    suspend fun deleteQuote(quote: QuoteEntity) = db.withTransaction {
+        require(paymentDao.countForQuote(quote.id) == 0) {
+            "Este orçamento possui recibos e recebimentos. Não pode ser excluído."
+        }
+        quoteDao.deleteQuote(quote)
+    }
+
+    fun observePayments(quoteId: Long): Flow<List<PaymentEntity>> = paymentDao.observeByQuote(quoteId)
+    suspend fun getPayments(quoteId: Long): List<PaymentEntity> = paymentDao.getByQuote(quoteId)
+
+    /**
+     * Valor em centavos, conferido na mesma transação do saldo.
+     * O aplicativo registra declaração manual do usuário, não confirmação bancária.
+     */
+    suspend fun registerPayment(
+        quoteId: Long,
+        amountCents: Long,
+        paidAt: Long,
+        method: String,
+        notes: String
+    ): Long = db.withTransaction {
+        require(amountCents > 0) { "Informe um valor maior que zero." }
+        require(method.isNotBlank()) { "Informe a forma de pagamento." }
+        require(paidAt > 0 && paidAt <= System.currentTimeMillis() + 86_400_000L) {
+            "Informe uma data válida para o recebimento."
+        }
+        val quote = quoteDao.getQuoteWithItems(quoteId)?.quote
+            ?: error("O orçamento não foi encontrado.")
+        require(quote.status == "APPROVED" || quote.status == "COMPLETED") {
+            "Aprove o orçamento antes de registrar o recebimento."
+        }
+        val totalCents = BigDecimal.valueOf(quote.total)
+            .movePointRight(2).setScale(0, RoundingMode.HALF_UP).longValueExact()
+        val received = paymentDao.receivedCents(quoteId)
+        require(amountCents <= totalCents - received) {
+            "O pagamento é maior que o valor ainda disponível para receber."
+        }
+        paymentDao.insert(PaymentEntity(
+            quoteId = quoteId,
+            amountCents = amountCents,
+            paidAt = paidAt,
+            method = method.trim(),
+            notes = notes.trim()
+        ))
+    }
 
     suspend fun duplicateQuote(sourceQuoteId: Long): Long {
         val original = quoteDao.getQuoteWithItems(sourceQuoteId) ?: return -1L
@@ -161,7 +217,8 @@ class QuoteRepository(private val db: AppDatabase) {
             quotes = quoteDao.getAllQuotesRaw(),
             items = quoteDao.getAllQuoteItemsRaw(),
             clients = clientDao.getAllClientsRaw(),
-            products = productServiceDao.getAllRaw()
+            products = productServiceDao.getAllRaw(),
+            payments = paymentDao.getAllRaw()
         )
     }
 
@@ -171,11 +228,13 @@ class QuoteRepository(private val db: AppDatabase) {
         items: List<QuoteItemEntity>,
         clients: List<ClientEntity>,
         products: List<ProductServiceEntity>,
-        replaceExisting: Boolean
+        replaceExisting: Boolean,
+        payments: List<PaymentEntity> = emptyList()
     ) {
         db.withTransaction {
             if (replaceExisting) {
                 // Modo SUBSTITUIR: limpa tabelas e restaura os IDs exatamente como vieram
+                paymentDao.clearAll()
                 quoteDao.clearAllQuoteItems()
                 quoteDao.clearAllQuotes()
                 clientDao.clearAllClients()
@@ -186,6 +245,7 @@ class QuoteRepository(private val db: AppDatabase) {
                 if (products.isNotEmpty()) productServiceDao.insertAll(products)
                 if (quotes.isNotEmpty()) quoteDao.insertQuotesRaw(quotes)
                 if (items.isNotEmpty()) quoteDao.insertQuoteItemsRaw(items)
+                if (payments.isNotEmpty()) paymentDao.insertRaw(payments)
             } else {
                 // Modo MESCLAR:
                 // 1. Perfil da Empresa: preserva dados locais se já existirem; apenas preenche se vazio
@@ -296,6 +356,14 @@ class QuoteRepository(private val db: AppDatabase) {
                 if (remappedItems.isNotEmpty()) {
                     quoteDao.insertQuoteItems(remappedItems)
                 }
+
+                // Preserve recibos históricos com referências aos orçamentos importados.
+                val remappedPayments = payments.map { payment ->
+                    val newQuoteId = quoteIdMap[payment.quoteId]
+                        ?: error("Backup contém recebimento sem orçamento correspondente.")
+                    payment.copy(id = 0, quoteId = newQuoteId)
+                }
+                if (remappedPayments.isNotEmpty()) paymentDao.insertRaw(remappedPayments)
             }
 
             // Sincronizar o contador de sequência com o maior número existente no ano
@@ -321,5 +389,6 @@ data class DatabaseBackupSnapshot(
     val quotes: List<QuoteEntity>,
     val items: List<QuoteItemEntity>,
     val clients: List<ClientEntity>,
-    val products: List<ProductServiceEntity>
+    val products: List<ProductServiceEntity>,
+    val payments: List<PaymentEntity> = emptyList()
 )
