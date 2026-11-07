@@ -40,6 +40,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -62,8 +63,11 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.entity.CompanyProfileEntity
+import com.example.data.entity.PaymentEntity
 import com.example.data.entity.QuoteWithItems
 import com.example.data.repository.QuoteRepository
 import com.example.domain.model.QuoteStatus
@@ -77,6 +81,8 @@ import com.example.ui.theme.SlateMuted
 import com.example.util.Formatters
 import com.example.util.PdfGenerator
 import kotlinx.coroutines.launch
+import java.math.BigDecimal
+import java.math.RoundingMode
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -95,6 +101,14 @@ fun QuoteDetailScreen(
     var companyProfile by remember { mutableStateOf(CompanyProfileEntity()) }
     var isLoading by remember { mutableStateOf(true) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    var showPaymentDialog by remember { mutableStateOf(false) }
+    var paymentAmountText by remember { mutableStateOf("") }
+    var paymentMethodText by remember { mutableStateOf("PIX") }
+    var paymentNotesText by remember { mutableStateOf("") }
+    var savingPayment by remember { mutableStateOf(false) }
+    val paymentFlow = remember(quoteId) { repository.observePayments(quoteId) }
+    val payments by paymentFlow.collectAsStateWithLifecycle(initialValue = emptyList())
+
 
     BackHandler {
         onNavigateBack()
@@ -127,10 +141,10 @@ fun QuoteDetailScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = { onEditQuote(quoteId) }) {
+                    IconButton(onClick = { onEditQuote(quoteId) }, enabled = payments.isEmpty()) {
                         Icon(Icons.Default.Edit, contentDescription = "Editar", tint = Color.White)
                     }
-                    IconButton(onClick = { showDeleteConfirm = true }) {
+                    IconButton(onClick = { showDeleteConfirm = true }, enabled = payments.isEmpty()) {
                         Icon(Icons.Default.Delete, contentDescription = "Excluir", tint = Color.White)
                     }
                 },
@@ -159,6 +173,11 @@ fun QuoteDetailScreen(
         val quote = data.quote
         val items = data.items
         val statusEnum = QuoteStatus.fromCode(quote.status)
+        val totalCents = BigDecimal.valueOf(quote.total)
+            .movePointRight(2).setScale(0, RoundingMode.HALF_UP).longValueExact()
+        val receivedCents = payments.sumOf { it.amountCents }
+        val remainingCents = (totalCents - receivedCents).coerceAtLeast(0)
+
 
         LazyColumn(
             contentPadding = innerPadding,
@@ -296,6 +315,88 @@ fun QuoteDetailScreen(
                         Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text("WhatsApp")
+                    }
+                }
+            }
+
+            // Recebimentos reais e recibos. Aprovação da proposta não equivale a pagamento.
+            item {
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("Recebimentos e Recibos", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = NavyPrimary)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Recebido", color = SlateMuted)
+                            Text(Formatters.formatCurrency(receivedCents / 100.0), color = EmeraldAccent, fontWeight = FontWeight.Bold)
+                        }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Saldo pendente", color = SlateMuted)
+                            Text(Formatters.formatCurrency(remainingCents / 100.0), fontWeight = FontWeight.Bold)
+                        }
+                        if (remainingCents == 0L && payments.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text("Pagamento integral registrado", color = EmeraldAccent, fontWeight = FontWeight.SemiBold)
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                        if (quote.status in listOf("APPROVED", "COMPLETED") && remainingCents > 0L) {
+                            Button(
+                                onClick = {
+                                    paymentAmountText = BigDecimal.valueOf(remainingCents, 2).toPlainString().replace('.', ',')
+                                    paymentMethodText = quote.paymentMethod.ifBlank { "PIX" }
+                                    paymentNotesText = ""
+                                    showPaymentDialog = true
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = NavyPrimary),
+                                modifier = Modifier.fillMaxWidth().testTag("register_payment_button")
+                            ) {
+                                Text("Registrar pagamento recebido")
+                            }
+                        } else if (quote.status !in listOf("APPROVED", "COMPLETED")) {
+                            Text("Aprove o orçamento para registrar um recebimento.", color = SlateMuted, fontSize = 12.sp)
+                        }
+
+                        payments.forEach { payment ->
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = CardBorder)
+                            Text(
+                                "Recibo REC-${quote.id}-${payment.id} • ${Formatters.formatDate(payment.paidAt)}",
+                                fontSize = 12.sp, color = SlateMuted
+                            )
+                            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(Formatters.formatCurrency(payment.amountCents / 100.0), fontWeight = FontWeight.Bold)
+                                    Text(payment.method, color = SlateMuted, fontSize = 12.sp)
+                                }
+                                OutlinedButton(onClick = {
+                                    scope.launch {
+                                        try {
+                                            val file = PdfGenerator.generateReceiptPdf(context, quote, payment, companyProfile)
+                                            val uri = PdfGenerator.getFileUri(context, file)
+                                            val intent = Intent(Intent.ACTION_SEND).apply {
+                                                type = "application/pdf"
+                                                putExtra(Intent.EXTRA_STREAM, uri)
+                                                putExtra(Intent.EXTRA_SUBJECT, "Recibo REC-${quote.id}-${payment.id}")
+                                                putExtra(Intent.EXTRA_TEXT, "Segue o recibo do pagamento de ${Formatters.formatCurrency(payment.amountCents / 100.0)} referente ao orçamento ${quote.quoteNumber}.")
+                                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                            }
+                                            context.startActivity(Intent.createChooser(intent, "Enviar recibo PDF"))
+                                        } catch (e: Exception) {
+                                            snackbarHostState.showSnackbar("Não foi possível gerar o recibo: ${e.localizedMessage}")
+                                        }
+                                    }
+                                }, modifier = Modifier.testTag("share_receipt_${payment.id}")) {
+                                    Text("Recibo PDF")
+                                }
+                            }
+                        }
+                        if (payments.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text("Por segurança, orçamentos com recebimentos não podem ser editados ou excluídos.", fontSize = 11.sp, color = SlateMuted)
+                        }
                     }
                 }
             }
@@ -444,6 +545,75 @@ fun QuoteDetailScreen(
                 Spacer(modifier = Modifier.height(32.dp))
             }
         }
+    }
+
+    if (showPaymentDialog) {
+        AlertDialog(
+            onDismissRequest = { if (!savingPayment) showPaymentDialog = false },
+            title = { Text("Registrar recebimento") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Registre apenas um pagamento que você já recebeu. O aplicativo não verifica pagamentos bancários.", fontSize = 12.sp)
+                    OutlinedTextField(
+                        value = paymentAmountText,
+                        onValueChange = { paymentAmountText = it },
+                        label = { Text("Valor recebido (R$)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = paymentMethodText,
+                        onValueChange = { paymentMethodText = it },
+                        label = { Text("Forma de pagamento") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = paymentNotesText,
+                        onValueChange = { paymentNotesText = it },
+                        label = { Text("Observação (opcional)") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Text("Data do recebimento: hoje. Depois de salvar, o recibo ficará disponível neste orçamento.", color = SlateMuted, fontSize = 12.sp)
+                }
+            },
+            confirmButton = {
+                Button(
+                    enabled = !savingPayment,
+                    onClick = {
+                        val normalized = paymentAmountText.trim().let { raw ->
+                            if (',' in raw) raw.replace(".", "").replace(',', '.') else raw
+                        }
+                        val cents = runCatching {
+                            normalized.toBigDecimal().movePointRight(2)
+                                .setScale(0, RoundingMode.UNNECESSARY).longValueExact()
+                        }.getOrNull()
+                        if (cents == null || cents <= 0L || cents > remainingCents || paymentMethodText.isBlank()) {
+                            scope.launch { snackbarHostState.showSnackbar("Informe um valor válido até o saldo pendente e a forma de pagamento.") }
+                        } else {
+                            savingPayment = true
+                            scope.launch {
+                                try {
+                                    repository.registerPayment(quote.id, cents, System.currentTimeMillis(), paymentMethodText, paymentNotesText)
+                                    showPaymentDialog = false
+                                    snackbarHostState.showSnackbar("Recebimento salvo. Toque em Recibo PDF para enviar ao cliente.")
+                                } catch (e: Exception) {
+                                    snackbarHostState.showSnackbar("Pagamento não registrado: ${e.localizedMessage}")
+                                } finally {
+                                    savingPayment = false
+                                }
+                            }
+                        }
+                    }
+                ) { Text(if (savingPayment) "Salvando..." else "Confirmar recebimento") }
+            },
+            dismissButton = {
+                TextButton(enabled = !savingPayment, onClick = { showPaymentDialog = false }) {
+                    Text("Cancelar")
+                }
+            }
+        )
     }
 
     if (showDeleteConfirm) {
