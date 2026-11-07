@@ -1,0 +1,6 @@
+{
+  "name": "Orçamento Express",
+  "description": "Criação, emissão e compartilhamento de orçamentos profissionais em PDF para clientes, produtos e serviços 100% offline.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

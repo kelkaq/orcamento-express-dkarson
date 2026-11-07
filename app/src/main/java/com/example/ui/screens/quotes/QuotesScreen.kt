@@ -1,0 +1,625 @@
+package com.example.ui.screens.quotes
+
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PictureAsPdf
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.data.entity.QuoteEntity
+import com.example.data.entity.QuoteWithItems
+import com.example.domain.model.QuoteStatus
+import com.example.ui.components.StatusBadge
+import com.example.ui.theme.EmeraldAccent
+import com.example.ui.theme.EmeraldContainer
+import com.example.ui.theme.NavyDark
+import com.example.ui.theme.NavyPrimary
+import com.example.ui.theme.SlateMuted
+import com.example.ui.viewmodel.CompanyViewModel
+import com.example.ui.viewmodel.QuotesViewModel
+import com.example.util.Formatters
+import com.example.util.PdfGenerator
+import kotlinx.coroutines.launch
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun QuotesScreen(
+    viewModel: QuotesViewModel,
+    companyViewModel: CompanyViewModel,
+    onNewQuote: () -> Unit,
+    onEditQuote: (Long) -> Unit,
+    onViewDetail: (Long) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    val quotes by viewModel.quotesList.collectAsStateWithLifecycle()
+    val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
+    val selectedStatus by viewModel.selectedStatus.collectAsStateWithLifecycle()
+    val metrics by viewModel.metrics.collectAsStateWithLifecycle()
+    val companyProfile by companyViewModel.companyProfile.collectAsStateWithLifecycle()
+
+    var quoteToDelete by remember { mutableStateOf<QuoteEntity?>(null) }
+
+    Scaffold(
+        modifier = modifier.fillMaxSize(),
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        topBar = {
+            TopAppBar(
+                title = {
+                    Column {
+                        Text(
+                            text = "Orçamento Express",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 20.sp,
+                            color = Color.White
+                        )
+                        Text(
+                            text = if (companyProfile.tradeName.isNotBlank()) companyProfile.tradeName else "Propostas Comerciais Profissionais",
+                            fontSize = 12.sp,
+                            color = Color.White.copy(alpha = 0.8f)
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = NavyPrimary,
+                    titleContentColor = Color.White
+                )
+            )
+        },
+        floatingActionButton = {
+            FloatingActionButton(
+                onClick = onNewQuote,
+                containerColor = EmeraldAccent,
+                contentColor = Color.White,
+                shape = CircleShape,
+                modifier = Modifier.testTag("fab_new_quote")
+            ) {
+                Icon(Icons.Default.Add, contentDescription = "Novo Orçamento")
+            }
+        }
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+        ) {
+            // Metrics Banner
+            DashboardMetricsBanner(
+                totalCount = metrics.totalQuotes,
+                pendingCount = metrics.pendingCount,
+                approvedCount = metrics.approvedCount,
+                approvedRevenue = metrics.totalApprovedRevenue
+            )
+
+            // Search & Filters
+            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { viewModel.onSearchQueryChanged(it) },
+                    placeholder = { Text("Buscar por cliente ou número...") },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                    trailingIcon = {
+                        if (searchQuery.isNotBlank()) {
+                            IconButton(onClick = { viewModel.onSearchQueryChanged("") }) {
+                                Icon(Icons.Default.Clear, contentDescription = "Limpar")
+                            }
+                        }
+                    },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("search_quotes_input")
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Status Chips
+                val filterOptions = listOf(
+                    "ALL" to "Todos",
+                    "PENDING" to "Pendentes",
+                    "APPROVED" to "Aprovados",
+                    "COMPLETED" to "Concluídos",
+                    "REJECTED" to "Recusados"
+                )
+
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    items(filterOptions) { (code, label) ->
+                        val isSelected = selectedStatus == code
+                        FilterChip(
+                            selected = isSelected,
+                            onClick = { viewModel.onStatusFilterChanged(code) },
+                            label = { Text(label, fontSize = 12.sp) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = NavyPrimary,
+                                selectedLabelColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(20.dp),
+                            modifier = Modifier.testTag("filter_chip_$code")
+                        )
+                    }
+                }
+            }
+
+            // Quotes List
+            if (quotes.isEmpty()) {
+                EmptyQuotesView(
+                    searchQuery = searchQuery,
+                    selectedStatus = selectedStatus,
+                    onNewQuote = onNewQuote
+                )
+            } else {
+                LazyColumn(
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 88.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    items(quotes, key = { it.quote.id }) { quoteWithItems ->
+                        QuoteCard(
+                            quoteWithItems = quoteWithItems,
+                            onCardClick = { onViewDetail(quoteWithItems.quote.id) },
+                            onEdit = { onEditQuote(quoteWithItems.quote.id) },
+                            onDuplicate = {
+                                viewModel.duplicateQuote(quoteWithItems.quote.id) { newId ->
+                                    scope.launch {
+                                        snackbarHostState.showSnackbar("Orçamento duplicado com sucesso!")
+                                    }
+                                }
+                            },
+                            onDelete = { quoteToDelete = quoteWithItems.quote },
+                            onStatusChange = { newStatus ->
+                                viewModel.updateStatus(quoteWithItems.quote.id, newStatus)
+                            },
+                            onSharePdf = {
+                                scope.launch {
+                                    try {
+                                        val pdfFile = PdfGenerator.generateQuotePdf(context, quoteWithItems, companyProfile)
+                                        val pdfUri = PdfGenerator.getFileUri(context, pdfFile)
+                                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                            type = "application/pdf"
+                                            putExtra(Intent.EXTRA_STREAM, pdfUri)
+                                            putExtra(Intent.EXTRA_SUBJECT, "Orçamento ${quoteWithItems.quote.quoteNumber}")
+                                            putExtra(Intent.EXTRA_TEXT, "Segue em anexo o orçamento ${quoteWithItems.quote.quoteNumber} no valor de ${Formatters.formatCurrency(quoteWithItems.quote.total)}.")
+                                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                        }
+                                        context.startActivity(Intent.createChooser(shareIntent, "Compartilhar Orçamento PDF"))
+                                    } catch (e: Exception) {
+                                        snackbarHostState.showSnackbar("Erro ao gerar PDF: ${e.localizedMessage}")
+                                    }
+                                }
+                            },
+                            onSendWhatsApp = {
+                                scope.launch {
+                                    try {
+                                        val pdfFile = PdfGenerator.generateQuotePdf(context, quoteWithItems, companyProfile)
+                                        val pdfUri = PdfGenerator.getFileUri(context, pdfFile)
+
+                                        val message = "Olá, ${quoteWithItems.quote.clientName.ifBlank { "Cliente" }}! Segue o orçamento ${quoteWithItems.quote.quoteNumber} no valor de ${Formatters.formatCurrency(quoteWithItems.quote.total)}, válido até ${Formatters.formatDate(quoteWithItems.quote.validUntil)}."
+
+                                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                            type = "application/pdf"
+                                            putExtra(Intent.EXTRA_STREAM, pdfUri)
+                                            putExtra(Intent.EXTRA_TEXT, message)
+                                            setPackage("com.whatsapp")
+                                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                        }
+
+                                        try {
+                                            context.startActivity(shareIntent)
+                                        } catch (_: Exception) {
+                                            // Fallback to generic share
+                                            val fallbackIntent = Intent(Intent.ACTION_SEND).apply {
+                                                type = "application/pdf"
+                                                putExtra(Intent.EXTRA_STREAM, pdfUri)
+                                                putExtra(Intent.EXTRA_TEXT, message)
+                                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                            }
+                                            context.startActivity(Intent.createChooser(fallbackIntent, "Compartilhar Orçamento"))
+                                        }
+                                    } catch (e: Exception) {
+                                        snackbarHostState.showSnackbar("Erro ao compartilhar: ${e.localizedMessage}")
+                                    }
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    // Delete confirmation dialog
+    quoteToDelete?.let { quote ->
+        AlertDialog(
+            onDismissRequest = { quoteToDelete = null },
+            title = { Text("Excluir Orçamento?", fontWeight = FontWeight.Bold) },
+            text = { Text("Tem certeza que deseja excluir o orçamento ${quote.quoteNumber} do cliente \"${quote.clientName}\"? Esta ação não pode ser desfeita.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.deleteQuote(quote)
+                        quoteToDelete = null
+                        scope.launch { snackbarHostState.showSnackbar("Orçamento excluído com sucesso.") }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Excluir")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { quoteToDelete = null }) {
+                    Text("Cancelar")
+                }
+            }
+        )
+    }
+}
+
+@Composable
+fun DashboardMetricsBanner(
+    totalCount: Int,
+    pendingCount: Int,
+    approvedCount: Int,
+    approvedRevenue: Double
+) {
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = NavyDark),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = "Valor de propostas aprovadas e concluídas",
+                fontSize = 12.sp,
+                color = Color.White.copy(alpha = 0.7f)
+            )
+            Text(
+                text = Formatters.formatCurrency(approvedRevenue),
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+                color = EmeraldAccent
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                MetricItem(label = "Total", value = "$totalCount")
+                MetricItem(label = "Pendentes", value = "$pendingCount")
+                MetricItem(label = "Aprov./Concl.", value = "$approvedCount")
+            }
+        }
+    }
+}
+
+@Composable
+private fun MetricItem(label: String, value: String) {
+    Column {
+        Text(text = label, fontSize = 11.sp, color = Color.White.copy(alpha = 0.6f))
+        Text(text = value, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+    }
+}
+
+@Composable
+fun QuoteCard(
+    quoteWithItems: QuoteWithItems,
+    onCardClick: () -> Unit,
+    onEdit: () -> Unit,
+    onDuplicate: () -> Unit,
+    onDelete: () -> Unit,
+    onStatusChange: (String) -> Unit,
+    onSharePdf: () -> Unit,
+    onSendWhatsApp: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val quote = quoteWithItems.quote
+    val items = quoteWithItems.items
+    val statusEnum = QuoteStatus.fromCode(quote.status)
+    var menuExpanded by remember { mutableStateOf(false) }
+
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(onClick = onCardClick)
+            .testTag("quote_card_${quote.id}")
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            // Header Row: Number + Status Badge + 3-dots Menu
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = quote.quoteNumber,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp,
+                        color = NavyPrimary
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    StatusBadge(status = statusEnum)
+                }
+
+                Box {
+                    IconButton(
+                        onClick = { menuExpanded = true },
+                        modifier = Modifier.size(32.dp).testTag("quote_menu_button_${quote.id}")
+                    ) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "Opções")
+                    }
+
+                    DropdownMenu(
+                        expanded = menuExpanded,
+                        onDismissRequest = { menuExpanded = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Editar Orçamento") },
+                            leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                            onClick = { menuExpanded = false; onEdit() }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Duplicar") },
+                            leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null) },
+                            onClick = { menuExpanded = false; onDuplicate() }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Marcar como Aprovado") },
+                            leadingIcon = { Icon(Icons.Default.Check, contentDescription = null, tint = EmeraldAccent) },
+                            onClick = { menuExpanded = false; onStatusChange("APPROVED") }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Marcar como Concluído") },
+                            leadingIcon = { Icon(Icons.Default.Check, contentDescription = null) },
+                            onClick = { menuExpanded = false; onStatusChange("COMPLETED") }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Excluir", color = MaterialTheme.colorScheme.error) },
+                            leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+                            onClick = { menuExpanded = false; onDelete() }
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Client Name & Contact
+            Text(
+                text = quote.clientName.ifBlank { "Cliente não especificado" },
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 16.sp,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            // Items Summary
+            val itemsSummary = if (items.isNotEmpty()) {
+                val preview = items.take(2).joinToString(", ") { it.description }
+                if (items.size > 2) "$preview (+${items.size - 2})" else preview
+            } else "Nenhum item"
+
+            Text(
+                text = "${items.size} ${if (items.size == 1) "item" else "itens"}: $itemsSummary",
+                fontSize = 12.sp,
+                color = SlateMuted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Dates and Total Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Bottom
+            ) {
+                Column {
+                    Text(
+                        text = "Emissão: ${Formatters.formatDate(quote.issueDate)}",
+                        fontSize = 11.sp,
+                        color = SlateMuted
+                    )
+                    Text(
+                        text = "Válido até: ${Formatters.formatDate(quote.validUntil)}",
+                        fontSize = 11.sp,
+                        color = SlateMuted
+                    )
+                }
+
+                Text(
+                    text = Formatters.formatCurrency(quote.total),
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    color = EmeraldAccent
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Quick Actions Bar
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedButton(
+                    onClick = onSharePdf,
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    modifier = Modifier.testTag("quote_pdf_button_${quote.id}")
+                ) {
+                    Icon(Icons.Default.PictureAsPdf, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("PDF", fontSize = 12.sp)
+                }
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                Button(
+                    onClick = onSendWhatsApp,
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = EmeraldAccent),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    modifier = Modifier.testTag("quote_whatsapp_button_${quote.id}")
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("WhatsApp", fontSize = 12.sp)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun EmptyQuotesView(
+    searchQuery: String,
+    selectedStatus: String,
+    onNewQuote: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(32.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(80.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFFE2E8F0)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Description,
+                    contentDescription = null,
+                    modifier = Modifier.size(40.dp),
+                    tint = NavyPrimary
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Text(
+                text = if (searchQuery.isNotBlank() || selectedStatus != "ALL") "Nenhum orçamento encontrado" else "Nenhum orçamento cadastrado",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = if (searchQuery.isNotBlank()) "Tente refinar sua busca ou limpar os filtros." else "Crie seu primeiro orçamento comercial profissional com cálculo automático e geração de PDF.",
+                fontSize = 14.sp,
+                color = SlateMuted,
+                modifier = Modifier.padding(horizontal = 16.dp),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
+
+            if (searchQuery.isBlank() && selectedStatus == "ALL") {
+                Spacer(modifier = Modifier.height(20.dp))
+                Button(
+                    onClick = onNewQuote,
+                    colors = ButtonDefaults.buttonColors(containerColor = EmeraldAccent),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Criar Primeiro Orçamento")
+                }
+            }
+        }
+    }
+}
