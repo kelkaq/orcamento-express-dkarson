@@ -49,7 +49,7 @@ jobs:
               echo "Testes executados com sucesso."
               exit 0
             fi
-            if ! grep -Eiq 'status code (429|502|503|504)|Too Many Requests|Connection reset|Read timed out' "${log_file}"; then
+            if ! grep -Eiq 'status code (429|502|503|504)|Too Many Requests|Connection reset|Read timed out|MavenArtifactFetcher|HttpURLConnection\\.java' "${log_file}"; then
               echo "::error::Falha nos testes ou no código, não relacionada à indisponibilidade temporária do repositório."
               exit 1
             fi

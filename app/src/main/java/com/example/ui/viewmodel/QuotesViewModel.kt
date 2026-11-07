@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -25,11 +26,27 @@ class QuotesViewModel(private val repository: QuoteRepository) : ViewModel() {
     private val _selectedStatus = MutableStateFlow("ALL")
     val selectedStatus = _selectedStatus.asStateFlow()
 
-    val metrics: StateFlow<DashboardMetrics> = repository.dashboardMetrics.stateIn(
+    private val _period = MutableStateFlow("ALL")
+    val period = _period.asStateFlow()
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val metrics: StateFlow<DashboardMetrics> = _period.flatMapLatest { currentPeriod ->
+        repository.dashboardMetricsByPeriod(currentPeriod)
+    }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = DashboardMetrics()
     )
+
+    val paidQuoteIds: StateFlow<Set<Long>> = repository.allPayments
+        .map { entries -> entries.map { it.quoteId }.toSet() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
+
+    private val _operationError = MutableStateFlow<String?>(null)
+    val operationError = _operationError.asStateFlow()
+    fun clearOperationError() { _operationError.value = null }
+    fun onPeriodChanged(value: String) {
+        if (value in listOf("ALL", "MONTH", "LAST_MONTH", "YEAR")) _period.value = value
+    }
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val quotesList: StateFlow<List<QuoteWithItems>> = combine(
@@ -58,24 +75,34 @@ class QuotesViewModel(private val repository: QuoteRepository) : ViewModel() {
 
     fun updateStatus(quoteId: Long, newStatus: String) {
         viewModelScope.launch {
-            repository.updateQuoteStatus(quoteId, newStatus)
-            refreshMetrics()
+            try {
+                repository.updateQuoteStatus(quoteId, newStatus)
+                refreshMetrics()
+            } catch (e: Exception) {
+                _operationError.value = e.localizedMessage ?: "Não foi possível mudar a situação."
+            }
         }
     }
 
     fun deleteQuote(quote: QuoteEntity) {
         viewModelScope.launch {
-            repository.deleteQuote(quote)
-            refreshMetrics()
+            try {
+                repository.deleteQuote(quote)
+                refreshMetrics()
+            } catch (e: Exception) {
+                _operationError.value = e.localizedMessage ?: "Não foi possível excluir o orçamento."
+            }
         }
     }
 
     fun duplicateQuote(sourceQuoteId: Long, onDuplicated: (Long) -> Unit) {
         viewModelScope.launch {
-            val newId = repository.duplicateQuote(sourceQuoteId)
-            refreshMetrics()
-            if (newId > 0) {
-                onDuplicated(newId)
+            try {
+                val newId = repository.duplicateQuote(sourceQuoteId)
+                refreshMetrics()
+                if (newId > 0) onDuplicated(newId)
+            } catch (e: Exception) {
+                _operationError.value = e.localizedMessage ?: "Não foi possível duplicar o orçamento."
             }
         }
     }

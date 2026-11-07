@@ -44,8 +44,11 @@ android {
     debug {
       // Instala paralelamente ao aplicativo existente sem alterar os dados de produção.
       // O APK de teste fica em com.dkarson.orcamentoexpress.teste.
-      applicationIdSuffix = ".teste"
-      versionNameSuffix = "-teste"
+      // A ramificação experimental usa um aplicativo de teste separado.
+      // Assim o usuário conserva o Orçamento Express (Teste) anterior e seus dados.
+      val isReceiptsPreview = System.getenv("GITHUB_REF_NAME") == "feat/recibos-e-calculadora"
+      applicationIdSuffix = if (isReceiptsPreview) ".teste.recibos" else ".teste"
+      versionNameSuffix = if (isReceiptsPreview) "-teste-recibos" else "-teste"
       signingConfig = signingConfigs.getByName("debug")
     }
   }
