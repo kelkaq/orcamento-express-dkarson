@@ -27,7 +27,8 @@ import java.math.RoundingMode
 @Composable
 fun CalculatorDialog(
     onDismiss: () -> Unit,
-    onUseResult: (Double) -> Unit
+    onUseResult: (Double) -> Unit,
+    confirmLabel: String = "Usar resultado"
 ) {
     var calc by remember { mutableStateOf(CalculatorEngine()) }
     val rows = listOf(
@@ -73,7 +74,7 @@ fun CalculatorDialog(
                 onClick = {
                     result?.let { onUseResult(it.setScale(2, RoundingMode.HALF_UP).toDouble()) }
                 }
-            ) { Text("Usar resultado") }
+            ) { Text(confirmLabel) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } }
     )
