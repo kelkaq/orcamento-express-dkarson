@@ -1,5 +1,6 @@
 package com.example.ui.screens.quote_detail
 
+import android.app.DatePickerDialog
 import android.content.Context
 import android.content.Intent
 import androidx.activity.compose.BackHandler
@@ -83,6 +84,7 @@ import com.example.util.PdfGenerator
 import kotlinx.coroutines.launch
 import java.math.BigDecimal
 import java.math.RoundingMode
+import java.util.Calendar
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -105,6 +107,7 @@ fun QuoteDetailScreen(
     var paymentAmountText by remember { mutableStateOf("") }
     var paymentMethodText by remember { mutableStateOf("PIX") }
     var paymentNotesText by remember { mutableStateOf("") }
+    var paymentDateMillis by remember { mutableStateOf(System.currentTimeMillis()) }
     var savingPayment by remember { mutableStateOf(false) }
     val paymentFlow = remember(quoteId) { repository.observePayments(quoteId) }
     val payments by paymentFlow.collectAsStateWithLifecycle(initialValue = emptyList())
@@ -348,6 +351,7 @@ fun QuoteDetailScreen(
                                     paymentAmountText = BigDecimal.valueOf(remainingCents, 2).toPlainString().replace('.', ',')
                                     paymentMethodText = quote.paymentMethod.ifBlank { "PIX" }
                                     paymentNotesText = ""
+                                    paymentDateMillis = System.currentTimeMillis()
                                     showPaymentDialog = true
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = NavyPrimary),
@@ -581,7 +585,24 @@ fun QuoteDetailScreen(
                         label = { Text("Observação (opcional)") },
                         modifier = Modifier.fillMaxWidth()
                     )
-                    Text("Data do recebimento: hoje. Depois de salvar, o recibo ficará disponível neste orçamento.", color = SlateMuted, fontSize = 12.sp)
+                    OutlinedButton(onClick = {
+                        val calendar = Calendar.getInstance().apply { timeInMillis = paymentDateMillis }
+                        DatePickerDialog(
+                            context,
+                            { _, year, month, day ->
+                                paymentDateMillis = Calendar.getInstance().apply {
+                                    set(year, month, day, 12, 0, 0)
+                                    set(Calendar.MILLISECOND, 0)
+                                }.timeInMillis
+                            },
+                            calendar.get(Calendar.YEAR),
+                            calendar.get(Calendar.MONTH),
+                            calendar.get(Calendar.DAY_OF_MONTH)
+                        ).show()
+                    }) {
+                        Text("Data do recebimento: ${Formatters.formatDate(paymentDateMillis)}")
+                    }
+                    Text("Após salvar, o recibo ficará disponível neste orçamento.", color = SlateMuted, fontSize = 12.sp)
                 }
             },
             confirmButton = {
@@ -601,7 +622,7 @@ fun QuoteDetailScreen(
                             savingPayment = true
                             scope.launch {
                                 try {
-                                    repository.registerPayment(paymentDialogQuote.id, cents, System.currentTimeMillis(), paymentMethodText, paymentNotesText)
+                                    repository.registerPayment(paymentDialogQuote.id, cents, paymentDateMillis, paymentMethodText, paymentNotesText)
                                     showPaymentDialog = false
                                     snackbarHostState.showSnackbar("Recebimento salvo. Toque em Recibo PDF para enviar ao cliente.")
                                 } catch (e: Exception) {
