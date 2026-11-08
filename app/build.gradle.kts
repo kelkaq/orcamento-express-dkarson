@@ -107,7 +107,7 @@ dependencies {
   implementation("com.android.billingclient:billing:9.1.0")
   implementation("androidx.credentials:credentials:1.6.0")
   implementation("androidx.credentials:credentials-play-services-auth:1.6.0")
-  implementation("com.google.android.libraries.identity.googleid:googleid:1.2.1")
+  implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
   implementation("androidx.work:work-runtime-ktx:2.12.0")
   implementation(libs.androidx.activity.compose)
   // implementation(libs.androidx.camera.camera2)
