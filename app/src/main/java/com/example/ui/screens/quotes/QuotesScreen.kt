@@ -421,27 +421,25 @@ fun DashboardMetricsBanner(
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                text = "Propostas aprovadas e concluídas (por data de emissão)",
-                fontSize = 12.sp,
-                color = Color.White.copy(alpha = 0.7f)
-            )
-            Text(
-                text = Formatters.formatCurrency(metrics.totalApprovedRevenue),
-                fontSize = 24.sp,
-                fontWeight = FontWeight.Bold,
-                color = EmeraldAccent
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text("Recebido: ${Formatters.formatCurrency(metrics.totalReceived)}",
-                fontWeight = FontWeight.SemiBold, color = Color.White, fontSize = 12.sp)
-            TextButton(
-                onClick = onToggleExpanded,
-                modifier = Modifier.testTag("financial_details_toggle")
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text(if (expanded) "Ocultar detalhes financeiros" else "Ver painel financeiro",
-                    color = Color.White, fontSize = 12.sp)
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Propostas aprovadas", fontSize = 11.sp,
+                        color = Color.White.copy(alpha = 0.75f))
+                    Text(Formatters.formatCurrency(metrics.totalApprovedRevenue), fontSize = 19.sp,
+                        fontWeight = FontWeight.Bold, color = EmeraldAccent)
+                }
+                TextButton(
+                    onClick = onToggleExpanded,
+                    modifier = Modifier.testTag("financial_details_toggle")
+                ) {
+                    Text(if (expanded) "Ocultar detalhes" else "Ver financeiro",
+                        color = Color.White, fontSize = 12.sp)
+                }
             }
 
             if (expanded) {
@@ -498,9 +496,7 @@ fun DashboardMetricsBanner(
             Text("As propostas usam a data de emissão; os recebimentos usam a data informada no pagamento.",
                 fontSize = 10.sp, color = Color.White.copy(alpha = 0.6f))
 
-            } // expanded
-
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(10.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -509,6 +505,7 @@ fun DashboardMetricsBanner(
                 MetricItem(label = "Pendentes", value = "${metrics.pendingCount}")
                 MetricItem(label = "Aprov./Concl.", value = "${metrics.approvedCount}")
             }
+            } // expanded
         }
     }
 }
