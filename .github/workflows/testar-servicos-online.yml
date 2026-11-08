@@ -29,3 +29,10 @@ jobs:
           node --check server.mjs
           node --check web/app.js
           npm test
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Testar e conferir sintaxe do backend Supabase Edge
+        run: |
+          node --test supabase/functions/orcamento-api/lib.test.mjs
+          deno check supabase/functions/orcamento-api/index.ts
