@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.filled.Check
@@ -162,7 +163,15 @@ fun CompanyScreen(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
-                title = { Text("Minha Empresa & Ajustes", fontWeight = FontWeight.Bold, color = Color.White) },
+                title = { Text("Empresa e Ajustes", fontWeight = FontWeight.Bold, color = Color.White) },
+                actions = {
+                    IconButton(onClick = onOpenAccount, modifier = Modifier.testTag("top_account")) {
+                        Icon(Icons.Default.AccountCircle, contentDescription = "Minha conta", tint = Color.White)
+                    }
+                    IconButton(onClick = onOpenAbout, modifier = Modifier.testTag("top_about")) {
+                        Icon(Icons.Default.Info, contentDescription = "Sobre o aplicativo", tint = Color.White)
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = NavyPrimary)
             )
         }
