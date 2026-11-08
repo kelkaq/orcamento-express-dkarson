@@ -34,5 +34,5 @@ jobs:
           deno-version: v2.x
       - name: Testar e conferir sintaxe do backend Supabase Edge
         run: |
-          node --test supabase/functions/orcamento-api/lib.test.mjs
+          node --test supabase/functions/orcamento-api/*.test.mjs
           deno check supabase/functions/orcamento-api/index.ts

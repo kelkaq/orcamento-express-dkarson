@@ -446,8 +446,8 @@ Deno.serve(async (req:Request):Promise<Response>=>{
       return informationPage('Política de privacidade — Orçamento Express',privacyText);
     if(route==='/account-deletion' && req.method==='GET')
       return informationPage('Exclusão de conta — Orçamento Express',
-        '<p>Para excluir a conta online: abra o aplicativo e selecione Empresa, Minha conta, '+
-        'Excluir minha conta e backups online. Os orçamentos salvos no celular não são excluídos.</p>'+
+        '<p>Você pode solicitar exclusão pela <a href="'+esc(publicBase)+'/app">Central Online</a>: entre com código no e-mail, clique em Excluir conta online e confirme. Também é possível pelo aplicativo em Empresa → Minha conta → Excluir.</p>'+
+        '<p>São excluídos a conta, as sessões, os backups e as aprovações salvas na nuvem. Não são apagados os dados do celular.</p>'+
         '<p>Cancelamentos de assinatura são gerenciados diretamente pela Google Play.</p>');
     if(route.startsWith('/a/'))return await approval(req,route);
     if(route.startsWith('/v1/play/'))return await playRoute(req,route);

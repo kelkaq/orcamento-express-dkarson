@@ -16,8 +16,8 @@ android {
     applicationId = "com.dkarson.orcamentoexpress"
     minSdk = 24
     targetSdk = 36
-    versionCode = 4
-    versionName = "1.3"
+    versionCode = 5
+    versionName = "1.4"
 
     // Endpoint público HTTPS do verificador SEGURO, nunca credenciais Google no APK.
     val verifyEndpoint = System.getenv("BILLING_VERIFY_URL").orEmpty().trim()

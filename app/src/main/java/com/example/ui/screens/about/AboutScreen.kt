@@ -1,5 +1,9 @@
 package com.example.ui.screens.about
 
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.ui.platform.LocalContext
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -35,6 +39,13 @@ fun AboutScreen(
     onOpenAccount: () -> Unit,
     onOpenPlan: () -> Unit
 ) {
+    val context = LocalContext.current
+    val base = BuildConfig.CLOUD_API_URL.trim().trimEnd('/')
+    fun openOfficialPage(path: String) {
+        if (onlineConfigured && base.startsWith("https://")) {
+            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(base + path)))
+        }
+    }
     Scaffold(topBar = {
         TopAppBar(
             title = { Text("Sobre o aplicativo", color = androidx.compose.ui.graphics.Color.White) },
@@ -90,7 +101,17 @@ fun AboutScreen(
                         Text("Privacidade e atendimento", fontWeight = FontWeight.Bold)
                         Text("Os orçamentos ficam no aparelho. Recursos online só são usados quando configurados e autorizados.")
                         Text("Antes de trocar ou remover o aplicativo, exporte um backup em Empresa. A instalação de teste não compartilha os dados da versão de produção.")
-                        Text("Para suporte, procure o canal de atendimento indicado na página oficial da loja quando o aplicativo for publicado.")
+                        OutlinedButton(
+                            enabled = onlineConfigured,
+                            onClick = { openOfficialPage("/privacy") },
+                            modifier = Modifier.fillMaxWidth().testTag("about_privacy")
+                        ) { Text("Política de privacidade") }
+                        OutlinedButton(
+                            enabled = onlineConfigured,
+                            onClick = { openOfficialPage("/account-deletion") },
+                            modifier = Modifier.fillMaxWidth().testTag("about_account_deletion")
+                        ) { Text("Exclusão de conta e dados online") }
+                        Text("Para suporte, procure o canal de atendimento indicado na página oficial da Google Play.")
                     }
                 }
             }
