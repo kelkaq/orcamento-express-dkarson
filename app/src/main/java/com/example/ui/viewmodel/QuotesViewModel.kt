@@ -48,6 +48,17 @@ class QuotesViewModel(private val repository: QuoteRepository) : ViewModel() {
         if (value in listOf("ALL", "MONTH", "LAST_MONTH", "YEAR")) _period.value = value
     }
 
+    /**
+     * Histórico principal da Home: SEM filtro de busca/situação, diretamente do Room.
+     * Não depende do painel financeiro nem do último filtro selecionado.
+     */
+    val savedQuoteHistory: StateFlow<List<QuoteWithItems>> = repository.allQuotes
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
     @OptIn(ExperimentalCoroutinesApi::class)
     val quotesList: StateFlow<List<QuoteWithItems>> = combine(
         _selectedStatus,
