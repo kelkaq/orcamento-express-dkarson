@@ -61,7 +61,7 @@ jobs:
           chmod 600 "${RUNNER_TEMP}/upload.jks" "${RUNNER_TEMP}/play-service.json"
       - name: Testar e gerar AAB assinado
         run: |
-          gradle --no-daemon --no-configuration-cache --max-workers=2 :app:testReleaseUnitTest :app:bundleRelease
+          gradle --no-daemon --no-configuration-cache --max-workers=2 :app:testDebugUnitTest :app:bundleRelease
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.3'
