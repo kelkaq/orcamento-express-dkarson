@@ -36,7 +36,8 @@ class CommercialFlowTest {
         db = Room.inMemoryDatabaseBuilder(
             ApplicationProvider.getApplicationContext<Context>(), AppDatabase::class.java
         ).allowMainThreadQueries().build()
-        repo = QuoteRepository(db)
+        // Testes de funções Pro partem de assinatura previamente verificada.
+        repo = QuoteRepository(db) { true }
     }
 
     @After

@@ -17,6 +17,8 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.example.billing.EntitlementStore
+import com.example.billing.PlayBillingManager
 import com.example.data.database.AppDatabase
 import com.example.data.repository.QuoteRepository
 import com.example.ui.components.AppBottomNav
@@ -27,6 +29,8 @@ import com.example.ui.screens.company.CompanyScreen
 import com.example.ui.screens.quote_detail.QuoteDetailScreen
 import com.example.ui.screens.quote_edit.QuoteEditorScreen
 import com.example.ui.screens.quotes.QuotesScreen
+import com.example.ui.screens.pro.ProPlanScreen
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.viewmodel.CatalogViewModel
 import com.example.ui.viewmodel.CatalogViewModelFactory
@@ -40,27 +44,44 @@ import com.example.ui.viewmodel.QuotesViewModel
 import com.example.ui.viewmodel.QuotesViewModelFactory
 
 class MainActivity : ComponentActivity() {
+    private lateinit var manager: PlayBillingManager
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
         val database = AppDatabase.getDatabase(applicationContext)
-        val repository = QuoteRepository(database)
+        val entitlement = EntitlementStore(applicationContext)
+        manager = PlayBillingManager(applicationContext, entitlement)
+        val repository = QuoteRepository(database) { entitlement.isProNow() }
 
         setContent {
             MyApplicationTheme {
-                OrcamentoExpressApp(repository = repository)
+                OrcamentoExpressApp(repository = repository, billingManager = manager)
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (::manager.isInitialized) manager.restorePurchases()
+    }
+
+    override fun onDestroy() {
+        if (::manager.isInitialized) manager.close()
+        super.onDestroy()
     }
 }
 
 @Composable
-fun OrcamentoExpressApp(repository: QuoteRepository) {
+fun OrcamentoExpressApp(repository: QuoteRepository, billingManager: PlayBillingManager) {
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
+    val billingState by billingManager.state.collectAsStateWithLifecycle()
+    val goToPro: () -> Unit = {
+        navController.navigate(Screen.Pro.route) { launchSingleTop = true }
+    }
 
     // ViewModels for persistent tabs
     val quotesViewModel: QuotesViewModel = viewModel(
@@ -112,6 +133,8 @@ fun OrcamentoExpressApp(repository: QuoteRepository) {
                 QuotesScreen(
                     viewModel = quotesViewModel,
                     companyViewModel = companyViewModel,
+                    isPro = billingState.isPro,
+                    onUpgrade = goToPro,
                     onNewQuote = {
                         navController.navigate(Screen.QuoteEditor.createRoute())
                     },
@@ -141,7 +164,12 @@ fun OrcamentoExpressApp(repository: QuoteRepository) {
 
             // Company & Settings Tab
             composable(Screen.Company.route) {
-                CompanyScreen(viewModel = companyViewModel)
+                CompanyScreen(viewModel = companyViewModel, isPro = billingState.isPro,
+                    onOpenPlan = goToPro)
+            }
+
+            composable(Screen.Pro.route) {
+                ProPlanScreen(manager = billingManager, onBack = { navController.popBackStack() })
             }
 
             // Quote Editor Screen (New or Edit)
@@ -169,6 +197,8 @@ fun OrcamentoExpressApp(repository: QuoteRepository) {
                         navController.popBackStack()
                         quotesViewModel.refreshMetrics()
                     },
+                    isPro = billingState.isPro,
+                    onUpgrade = goToPro,
                     onQuoteSaved = { savedId ->
                         navController.popBackStack()
                         navController.navigate(Screen.QuoteDetail.createRoute(savedId))
@@ -190,6 +220,8 @@ fun OrcamentoExpressApp(repository: QuoteRepository) {
                 QuoteDetailScreen(
                     quoteId = quoteId,
                     repository = repository,
+                    canUsePro = billingState.isPro,
+                    onUpgrade = goToPro,
                     onNavigateBack = {
                         navController.popBackStack()
                         quotesViewModel.refreshMetrics()

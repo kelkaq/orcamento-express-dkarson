@@ -1,0 +1,9 @@
+{
+  "name": "dkarson-play-billing-verifier",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {"node": ">=20"},
+  "scripts": {"start": "node server.mjs", "test": "node --test"},
+  "dependencies": {"google-auth-library": "^10.0.0"}
+}

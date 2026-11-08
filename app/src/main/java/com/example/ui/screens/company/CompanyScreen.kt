@@ -87,6 +87,8 @@ import java.io.File
 @Composable
 fun CompanyScreen(
     viewModel: CompanyViewModel,
+    isPro: Boolean = false,
+    onOpenPlan: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -423,6 +425,24 @@ fun CompanyScreen(
                             Spacer(modifier = Modifier.width(6.dp))
                             Text("Salvar Dados da Empresa", fontWeight = FontWeight.Bold)
                         }
+                    }
+                }
+            }
+
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("Meu plano", fontWeight = FontWeight.Bold, color = NavyPrimary)
+                        Text(if (isPro) "Orçamento Express Pro ativo — criação ilimitada" else
+                            "Gratuito — até 5 novos orçamentos por mês", color = SlateMuted)
+                        OutlinedButton(
+                            onClick = onOpenPlan,
+                            modifier = Modifier.fillMaxWidth().testTag("company_plan_button")
+                        ) { Text(if (isPro) "Gerenciar assinatura" else "Conhecer o Pro") }
                     }
                 }
             }

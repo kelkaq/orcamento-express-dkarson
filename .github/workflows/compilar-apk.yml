@@ -7,6 +7,10 @@ on:
 permissions:
   contents: read
 
+env:
+  # URL pública (sem credenciais) do servidor de verificação seguro.
+  BILLING_VERIFY_URL: ${{ vars.BILLING_VERIFY_URL }}
+
 # Evita compilar commits antigos repetidamente: só a revisão mais recente permanece ativa.
 concurrency:
   group: android-ci-${{ github.ref }}
@@ -65,6 +69,36 @@ jobs:
             echo "::warning::Falha temporária ao baixar dependência; tentando novamente."
             sleep $((attempt * 30))
           done
+
+      - name: Gerar AAB release, apenas na main e com segredos de upload
+        if: github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          ANDROID_UPLOAD_KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -z "${ANDROID_UPLOAD_KEYSTORE_BASE64}" ] || [ -z "${STORE_PASSWORD}" ] || [ -z "${KEY_PASSWORD}" ]; then
+            echo "::notice::AAB ignorado: configure os segredos privados de assinatura de upload."
+            exit 0
+          fi
+          if [[ "${BILLING_VERIFY_URL}" != https://* ]]; then
+            echo "::error::BILLING_VERIFY_URL deve ser HTTPS e apontar para o verificador da assinatura."
+            exit 1
+          fi
+          export KEYSTORE_PATH="${RUNNER_TEMP}/dkarson-upload.jks"
+          trap 'rm -f "${KEYSTORE_PATH}"' EXIT
+          printf '%s' "${ANDROID_UPLOAD_KEYSTORE_BASE64}" | base64 --decode > "${KEYSTORE_PATH}"
+          gradle --no-daemon --no-configuration-cache --max-workers=2 :app:bundleRelease
+
+      - name: Disponibilizar AAB pronto para teste interno na Google Play
+        if: github.ref == 'refs/heads/main' && success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ORCAMENTO_EXPRESS_DKARSON_GOOGLE_PLAY_AAB
+          path: app/build/outputs/bundle/release/*.aab
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Disponibilizar APK para baixar
         if: success()

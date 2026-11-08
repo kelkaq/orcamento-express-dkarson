@@ -64,6 +64,9 @@ interface QuoteDao {
     @Query("UPDATE quotes SET status = :newStatus, updatedAt = :updatedAt WHERE id = :quoteId")
     suspend fun updateStatus(quoteId: Long, newStatus: String, updatedAt: Long = System.currentTimeMillis())
 
+    @Query("SELECT COUNT(*) FROM quotes WHERE createdAt >= :start AND createdAt < :end")
+    suspend fun countCreatedBetween(start: Long, end: Long): Int
+
     @Query("SELECT COUNT(*) FROM quotes")
     suspend fun countQuotes(): Int
 

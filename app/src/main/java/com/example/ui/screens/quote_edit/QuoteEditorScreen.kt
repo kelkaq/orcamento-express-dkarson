@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -98,6 +99,8 @@ fun QuoteEditorScreen(
     viewModel: QuoteEditorViewModel,
     onNavigateBack: () -> Unit,
     onQuoteSaved: (Long) -> Unit,
+    onUpgrade: () -> Unit = {},
+    isPro: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -477,10 +480,11 @@ fun QuoteEditorScreen(
 
             item {
                 OutlinedButton(
-                    onClick = { showTemplatePickerSheet = true },
+                    onClick = { if (isPro) showTemplatePickerSheet = true else onUpgrade() },
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
                         .testTag("open_quote_templates")
-                ) { Text("Utilizar modelo pronto (itens e condições)") }
+                ) { Text(if (isPro) "Utilizar modelo pronto (itens e condições)"
+                    else "Modelos de orçamento • Pro") }
             }
 
             // Items List
@@ -691,6 +695,28 @@ fun QuoteEditorScreen(
                 }
             }
         }
+    }
+
+    if (uiState.requiresProUpgrade) {
+        AlertDialog(
+            onDismissRequest = { viewModel.clearProUpgrade() },
+            title = { Text("Limite do plano Gratuito") },
+            text = {
+                Text("Você pode criar até 5 orçamentos por mês. Seus orçamentos e o rascunho atual estão preservados. " +
+                    "Conheça o Pro para criar orçamentos ilimitados.")
+            },
+            confirmButton = {
+                Button(onClick = {
+                    viewModel.clearProUpgrade()
+                    onUpgrade()
+                }, modifier = Modifier.testTag("quote_limit_upgrade")) {
+                    Text("Conhecer o Pro")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.clearProUpgrade() }) { Text("Continuar gratuitamente") }
+            }
+        )
     }
 
     // Modelos criados a partir de propostas reais; sem preços fictícios.

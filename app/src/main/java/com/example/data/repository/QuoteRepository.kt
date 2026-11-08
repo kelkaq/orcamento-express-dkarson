@@ -1,6 +1,9 @@
 package com.example.data.repository
 
 import androidx.room.withTransaction
+import com.example.billing.FreePlanLimitException
+import com.example.billing.PlanPolicy
+import com.example.billing.ProRequiredException
 import com.example.data.database.AppDatabase
 import com.example.data.entity.ClientEntity
 import com.example.data.entity.CompanyProfileEntity
@@ -33,7 +36,19 @@ data class DashboardMetrics(
     val overdueCount: Int = 0
 )
 
-class QuoteRepository(private val db: AppDatabase) {
+class QuoteRepository(
+    private val db: AppDatabase,
+    private val hasVerifiedPro: () -> Boolean = { false }
+) {
+    private fun requirePro(feature: String) {
+        if (!hasVerifiedPro()) throw ProRequiredException(feature)
+    }
+
+    suspend fun monthlyFreeQuotesUsed(now: Long = System.currentTimeMillis()): Int {
+        val (start, end) = PlanPolicy.currentMonthBounds(now)
+        return quoteDao.countCreatedBetween(start, end)
+    }
+
     val database: AppDatabase get() = db
 
     private val clientDao = db.clientDao()
@@ -139,6 +154,13 @@ class QuoteRepository(private val db: AppDatabase) {
     suspend fun getQuoteWithItems(id: Long): QuoteWithItems? = quoteDao.getQuoteWithItems(id)
 
     suspend fun saveQuoteWithItems(quote: QuoteEntity, items: List<QuoteItemEntity>): Long = db.withTransaction {
+        // Limite somente para NOVOS orçamentos. Visualizar/editar documentos existentes é sempre permitido.
+        if (quote.id <= 0L && !hasVerifiedPro()) {
+            val (start, end) = PlanPolicy.currentMonthBounds()
+            if (quoteDao.countCreatedBetween(start, end) >= PlanPolicy.FREE_QUOTES_PER_MONTH) {
+                throw FreePlanLimitException()
+            }
+        }
         require(quote.id <= 0 || paymentDao.countForQuote(quote.id) == 0) {
             "Este orçamento possui recebimentos. Não é permitido alterar os valores após o pagamento."
         }
@@ -178,6 +200,7 @@ class QuoteRepository(private val db: AppDatabase) {
         status: String
     ): Long = db.withTransaction {
         require(status in listOf("SCHEDULED", "IN_PROGRESS", "COMPLETED")) { "Situação da OS inválida." }
+        requirePro("Criar ou editar ordem de serviço")
         val q = quoteDao.getQuoteWithItems(quoteId)?.quote ?: error("Orçamento não encontrado.")
         require(q.status in listOf("APPROVED", "COMPLETED")) { "Aprove o orçamento para criar a OS." }
         val old = orderDao.getByQuote(quoteId)
@@ -206,6 +229,7 @@ class QuoteRepository(private val db: AppDatabase) {
     }
 
     suspend fun saveTemplateFromQuote(quoteId: Long, title: String): Long = db.withTransaction {
+        requirePro("Criar modelos de orçamento")
         require(title.trim().isNotBlank()) { "Informe o nome do modelo." }
         val quote = quoteDao.getQuoteWithItems(quoteId) ?: error("Orçamento não encontrado.")
         val json = JSONArray().apply {
@@ -247,6 +271,7 @@ class QuoteRepository(private val db: AppDatabase) {
         method: String,
         notes: String
     ): Long = db.withTransaction {
+        requirePro("Registrar recebimentos e emitir novos recibos")
         require(amountCents > 0) { "Informe um valor maior que zero." }
         require(method.isNotBlank()) { "Informe a forma de pagamento." }
         require(paidAt > 0 && paidAt <= System.currentTimeMillis() + 86_400_000L) {
@@ -285,7 +310,7 @@ class QuoteRepository(private val db: AppDatabase) {
             updatedAt = System.currentTimeMillis()
         )
         val duplicatedItems = original.items.map { it.copy(id = 0, quoteId = 0) }
-        return quoteDao.saveQuoteWithItems(duplicatedQuote, duplicatedItems)
+        return saveQuoteWithItems(duplicatedQuote, duplicatedItems)
     }
 
     suspend fun generateNextQuoteNumber(): String {

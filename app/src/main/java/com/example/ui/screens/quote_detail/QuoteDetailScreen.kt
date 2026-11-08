@@ -95,6 +95,8 @@ fun QuoteDetailScreen(
     repository: QuoteRepository,
     onNavigateBack: () -> Unit,
     onEditQuote: (Long) -> Unit,
+    canUsePro: Boolean = false,
+    onUpgrade: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -364,6 +366,9 @@ fun QuoteDetailScreen(
                         if (quote.status in listOf("APPROVED", "COMPLETED")) {
                             Button(
                                 onClick = {
+                                    if (!canUsePro) {
+                                        onUpgrade()
+                                    } else {
                                     val order = serviceOrder
                                     orderResponsible = order?.responsible.orEmpty()
                                     orderDescription = order?.description ?: items.joinToString("; ") { it.description }
@@ -372,10 +377,12 @@ fun QuoteDetailScreen(
                                     orderStatus = order?.status ?: "SCHEDULED"
                                     orderScheduledAt = order?.scheduledAt
                                     showServiceOrderDialog = true
+                                    }
                                 },
                                 modifier = Modifier.fillMaxWidth().testTag("service_order_button"),
                                 colors = ButtonDefaults.buttonColors(containerColor = NavyPrimary)
-                            ) { Text(if (serviceOrder == null) "Converter em Ordem de Serviço" else "Editar Ordem de Serviço") }
+                            ) { Text(if (!canUsePro) "Ordem de Serviço • Pro" else
+                                if (serviceOrder == null) "Converter em Ordem de Serviço" else "Editar Ordem de Serviço") }
                         }
                         serviceOrder?.let { order ->
                             OutlinedButton(
@@ -401,11 +408,14 @@ fun QuoteDetailScreen(
                         }
                         OutlinedButton(
                             onClick = {
-                                templateName = ""
-                                showTemplateDialog = true
+                                if (!canUsePro) onUpgrade() else {
+                                    templateName = ""
+                                    showTemplateDialog = true
+                                }
                             },
                             modifier = Modifier.fillMaxWidth().testTag("save_as_template_button")
-                        ) { Text("Salvar este orçamento como modelo") }
+                        ) { Text(if (canUsePro) "Salvar este orçamento como modelo"
+                            else "Salvar como modelo • Pro") }
                     }
                 }
             }
@@ -436,16 +446,21 @@ fun QuoteDetailScreen(
                         if (quote.status in listOf("APPROVED", "COMPLETED") && remainingCents > 0L) {
                             Button(
                                 onClick = {
+                                    if (!canUsePro) {
+                                        onUpgrade()
+                                    } else {
                                     paymentAmountText = BigDecimal.valueOf(remainingCents, 2).toPlainString().replace('.', ',')
                                     paymentMethodText = quote.paymentMethod.ifBlank { "PIX" }
                                     paymentNotesText = ""
                                     paymentDateMillis = System.currentTimeMillis()
                                     showPaymentDialog = true
+                                    }
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = NavyPrimary),
                                 modifier = Modifier.fillMaxWidth().testTag("register_payment_button")
                             ) {
-                                Text("Registrar pagamento recebido")
+                                Text(if (canUsePro) "Registrar pagamento recebido"
+                                    else "Registrar pagamento • Pro")
                             }
                         } else if (quote.status !in listOf("APPROVED", "COMPLETED")) {
                             Text("Aprove o orçamento para registrar um recebimento.", color = SlateMuted, fontSize = 12.sp)

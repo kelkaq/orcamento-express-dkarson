@@ -107,6 +107,8 @@ fun QuotesScreen(
     onEditQuote: (Long) -> Unit,
     onViewDetail: (Long) -> Unit,
     onRestoreData: () -> Unit,
+    isPro: Boolean = false,
+    onUpgrade: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -217,6 +219,32 @@ fun QuotesScreen(
             }
             }
 
+            item(key = "home_plan_banner") {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(if (isPro) "PLANO PRO ATIVO" else "PLANO GRATUITO",
+                            color = NavyPrimary, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        val used = savedHistory.count {
+                            val (from, until) = com.example.billing.PlanPolicy.currentMonthBounds()
+                            it.quote.createdAt >= from && it.quote.createdAt < until
+                        }
+                        Text(if (isPro) "Orçamentos ilimitados" else
+                            "${used.coerceAtMost(5)}/5 novos orçamentos criados neste mês",
+                            fontSize = 11.sp, color = SlateMuted)
+                    }
+                    if (!isPro) {
+                        Button(onClick = onUpgrade,
+                            modifier = Modifier.testTag("home_upgrade_pro")) {
+                            Text("Conhecer Pro")
+                        }
+                    }
+                }
+            }
+
             // Histórico de verdade, independente de busca e filtros.
             // As propostas existentes ficam no alto da Home, como nas primeiras versões.
             if (savedHistory.isNotEmpty()) {
@@ -246,7 +274,10 @@ fun QuotesScreen(
                 selectedPeriod = selectedPeriod,
                 onPeriodChange = viewModel::onPeriodChanged,
                 expanded = financeExpanded,
-                onToggleExpanded = { financeExpanded = !financeExpanded }
+                onToggleExpanded = {
+                    if (isPro) financeExpanded = !financeExpanded else onUpgrade()
+                },
+                locked = !isPro
             )
             }
 
@@ -492,7 +523,8 @@ fun DashboardMetricsBanner(
     selectedPeriod: String,
     onPeriodChange: (String) -> Unit,
     expanded: Boolean,
-    onToggleExpanded: () -> Unit
+    onToggleExpanded: () -> Unit,
+    locked: Boolean = false
 ) {
     Card(
         shape = RoundedCornerShape(16.dp),
@@ -517,7 +549,7 @@ fun DashboardMetricsBanner(
                     onClick = onToggleExpanded,
                     modifier = Modifier.testTag("financial_details_toggle")
                 ) {
-                    Text(if (expanded) "Ocultar detalhes" else "Ver financeiro",
+                    Text(if (locked) "Financeiro • Pro" else if (expanded) "Ocultar detalhes" else "Ver financeiro",
                         color = Color.White, fontSize = 12.sp)
                 }
             }

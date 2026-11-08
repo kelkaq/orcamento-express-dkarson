@@ -8,6 +8,8 @@ import com.example.data.entity.CompanyProfileEntity
 import com.example.data.entity.ProductServiceEntity
 import com.example.data.entity.QuoteEntity
 import com.example.data.entity.QuoteItemEntity
+import com.example.billing.FreePlanLimitException
+import com.example.billing.ProRequiredException
 import com.example.data.entity.QuoteTemplateEntity
 import com.example.util.QuoteDraftSerializer
 import org.json.JSONArray
@@ -47,6 +49,7 @@ data class QuoteEditorUiState(
     val total: Double = 0.0,
     val isSaving: Boolean = false,
     val errorMessage: String? = null,
+    val requiresProUpgrade: Boolean = false,
     val isSavedSuccess: Boolean = false,
     val draftRecovered: Boolean = false,
     val savedQuoteId: Long? = null
@@ -405,7 +408,8 @@ class QuoteEditorViewModel(
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
                     isSaving = false,
-                    errorMessage = "Erro ao salvar orçamento: ${e.localizedMessage}"
+                    requiresProUpgrade = e is FreePlanLimitException || e is ProRequiredException,
+                    errorMessage = e.localizedMessage ?: "Não foi possível salvar o orçamento."
                 )
             }
         }
@@ -413,6 +417,9 @@ class QuoteEditorViewModel(
 
     fun clearError() {
         _uiState.value = _uiState.value.copy(errorMessage = null)
+    }
+    fun clearProUpgrade() {
+        _uiState.value = _uiState.value.copy(requiresProUpgrade = false)
     }
 }
 
