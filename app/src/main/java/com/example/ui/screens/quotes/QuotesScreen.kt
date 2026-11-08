@@ -115,6 +115,7 @@ fun QuotesScreen(
     val snackbarHostState = remember { SnackbarHostState() }
 
     val quotes by viewModel.quotesList.collectAsStateWithLifecycle()
+    val savedHistory by viewModel.savedQuoteHistory.collectAsStateWithLifecycle()
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
     val selectedStatus by viewModel.selectedStatus.collectAsStateWithLifecycle()
     val metrics by viewModel.metrics.collectAsStateWithLifecycle()
@@ -200,7 +201,11 @@ fun QuotesScreen(
                 Column(modifier = Modifier.weight(1f)) {
                     Text("Histórico de orçamentos", fontWeight = FontWeight.Bold, fontSize = 17.sp,
                         color = NavyPrimary, modifier = Modifier.testTag("home_history_title"))
-                    Text("Consulte, duplique ou envie suas propostas", fontSize = 11.sp, color = SlateMuted)
+                    Text(
+                        "${savedHistory.size} orçamento(s) salvo(s) neste aplicativo",
+                        fontSize = 11.sp, color = SlateMuted,
+                        modifier = Modifier.testTag("home_saved_quote_count")
+                    )
                 }
                 OutlinedButton(
                     onClick = {
@@ -210,6 +215,28 @@ fun QuotesScreen(
                     modifier = Modifier.testTag("home_show_all_quotes")
                 ) { Text("Ver todos", fontSize = 12.sp) }
             }
+            }
+
+            // Histórico de verdade, independente de busca e filtros.
+            // As propostas existentes ficam no alto da Home, como nas primeiras versões.
+            if (savedHistory.isNotEmpty()) {
+                item(key = "home_recent_history_header") {
+                    Text(
+                        "Últimos orçamentos",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = NavyPrimary,
+                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 2.dp)
+                    )
+                }
+                items(savedHistory.take(3), key = { "recent_quote_${it.quote.id}" }) { entry ->
+                    RecentSavedQuoteCard(
+                        quoteWithItems = entry,
+                        onClick = { onViewDetail(entry.quote.id) },
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 3.dp)
+                            .testTag("home_recent_quote_${entry.quote.id}")
+                    )
+                }
             }
 
             // O painel financeiro não deve empurrar o histórico para fora da tela.
@@ -285,7 +312,8 @@ fun QuotesScreen(
                     searchQuery = searchQuery,
                     selectedStatus = selectedStatus,
                     onNewQuote = onNewQuote,
-                    onRestoreData = onRestoreData
+                    onRestoreData = onRestoreData,
+                    savedQuoteCount = savedHistory.size
                 )
                 }
             } else {
@@ -402,6 +430,59 @@ fun QuotesScreen(
                 }
             }
         )
+    }
+}
+
+/** Cartão resumido do histórico salvo: origem não filtrada e link ao orçamento real. */
+@Composable
+private fun RecentSavedQuoteCard(
+    quoteWithItems: QuoteWithItems,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val quote = quoteWithItems.quote
+    Card(
+        modifier = modifier.clickable(onClick = onClick),
+        shape = RoundedCornerShape(12.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    quote.quoteNumber,
+                    color = NavyPrimary,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp,
+                    maxLines = 1,
+                    modifier = Modifier.weight(1f)
+                )
+                StatusBadge(QuoteStatus.fromCode(quote.status))
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                quote.clientName.ifBlank { "Cliente não informado" },
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+                fontSize = 14.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("Emissão: ${Formatters.formatDate(quote.issueDate)}",
+                    fontSize = 11.sp, color = SlateMuted)
+                Text(Formatters.formatCurrency(quote.total),
+                    color = EmeraldAccent, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            }
+        }
     }
 }
 
@@ -706,7 +787,8 @@ fun EmptyQuotesView(
     searchQuery: String,
     selectedStatus: String,
     onNewQuote: () -> Unit,
-    onRestoreData: () -> Unit
+    onRestoreData: () -> Unit,
+    savedQuoteCount: Int = 0
 ) {
     Box(
         modifier = Modifier
@@ -736,7 +818,9 @@ fun EmptyQuotesView(
             Spacer(modifier = Modifier.height(16.dp))
 
             Text(
-                text = if (searchQuery.isNotBlank() || selectedStatus != "ALL") "Nenhum orçamento encontrado" else "Nenhum orçamento cadastrado",
+                text = if (savedQuoteCount > 0 || searchQuery.isNotBlank() || selectedStatus != "ALL")
+                    "Nenhum resultado para os filtros"
+                else "Nenhum orçamento cadastrado",
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface
@@ -745,16 +829,16 @@ fun EmptyQuotesView(
             Spacer(modifier = Modifier.height(8.dp))
 
             Text(
-                text = if (searchQuery.isNotBlank() || selectedStatus != "ALL")
-                    "Altere os filtros ou toque em Ver todos para consultar as propostas."
-                    else "Este aplicativo ainda não possui propostas salvas. Se os orçamentos estiverem em outra instalação, recupere-os por backup.",
+                text = if (savedQuoteCount > 0 || searchQuery.isNotBlank() || selectedStatus != "ALL")
+                    "O histórico acima continua disponível. Toque em Ver todos para retirar os filtros."
+                    else "Ao salvar seu primeiro orçamento, ele aparecerá automaticamente aqui.",
                 fontSize = 14.sp,
                 color = SlateMuted,
                 modifier = Modifier.padding(horizontal = 16.dp),
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center
             )
 
-            if (searchQuery.isBlank() && selectedStatus == "ALL") {
+            if (savedQuoteCount == 0 && searchQuery.isBlank() && selectedStatus == "ALL") {
                 Spacer(modifier = Modifier.height(20.dp))
                 Button(
                     onClick = onNewQuote,

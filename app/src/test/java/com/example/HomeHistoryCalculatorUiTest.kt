@@ -91,7 +91,20 @@ class HomeHistoryCalculatorUiTest {
         val quotesViewModel = showHome()
         compose.onNodeWithTag("home_history_title").assertIsDisplayed()
         compose.waitUntil(timeoutMillis = 8000) {
-            quotesViewModel.quotesList.value.isNotEmpty()
+            quotesViewModel.savedQuoteHistory.value.any { it.quote.id == id }
+        }
+        // Proposta recente aparece no topo, antes do painel e dos filtros.
+        compose.onNodeWithTag("home_recent_quote_$id").assertIsDisplayed()
+
+        // Alterar o filtro pode ocultar a lista completa, mas NUNCA o histórico recente.
+        quotesViewModel.onStatusFilterChanged("REJECTED")
+        compose.waitForIdle()
+        compose.onNodeWithTag("home_recent_quote_$id").assertIsDisplayed()
+
+        // Ao remover o filtro, o cartão original continua acessível no histórico geral.
+        quotesViewModel.onStatusFilterChanged("ALL")
+        compose.waitUntil(timeoutMillis = 8000) {
+            quotesViewModel.quotesList.value.any { it.quote.id == id }
         }
         compose.onNodeWithTag("home_main_scroll_history")
             .performScrollToNode(hasTestTag("quote_card_$id"))
