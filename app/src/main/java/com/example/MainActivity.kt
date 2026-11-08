@@ -120,6 +120,11 @@ fun OrcamentoExpressApp(repository: QuoteRepository) {
                     },
                     onViewDetail = { quoteId ->
                         navController.navigate(Screen.QuoteDetail.createRoute(quoteId))
+                    },
+                    onRestoreData = {
+                        navController.navigate(Screen.Company.route) {
+                            launchSingleTop = true
+                        }
                     }
                 )
             }
