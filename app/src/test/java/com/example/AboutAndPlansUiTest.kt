@@ -3,6 +3,8 @@ package com.example
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import com.example.billing.PlanTier
@@ -34,7 +36,9 @@ class AboutAndPlansUiTest {
         }
         compose.onNodeWithTag("about_screen").assertIsDisplayed()
         compose.onNodeWithTag("about_app_version").assertIsDisplayed()
+        compose.onNodeWithTag("about_screen").performScrollToNode(hasTestTag("about_privacy"))
         compose.onNodeWithTag("about_privacy").assertIsNotEnabled()
+        compose.onNodeWithTag("about_screen").performScrollToNode(hasTestTag("about_account_deletion"))
         compose.onNodeWithTag("about_account_deletion").assertIsNotEnabled()
     }
 }
