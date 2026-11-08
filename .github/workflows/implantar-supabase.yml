@@ -1,0 +1,75 @@
+name: Ativar Supabase — Orçamento Express (manual)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: production-supabase
+  cancel-in-progress: false
+
+jobs:
+  implantar:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 35
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+      PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+      OE_ENCRYPTION_KEY_BASE64: ${{ secrets.OE_ENCRYPTION_KEY_BASE64 }}
+      PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL: ${{ vars.PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v3
+        with:
+          version: v2.stable
+      - name: Verificar configurações sem expor credenciais
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${SUPABASE_PROJECT_REF}" =~ ^[a-z0-9]{20}$ ]] || {
+            echo "::error::SUPABASE_PROJECT_REF ausente ou inválido."; exit 1;
+          }
+          for name in SUPABASE_ACCESS_TOKEN SUPABASE_DB_PASSWORD PLAY_SERVICE_ACCOUNT_JSON OE_ENCRYPTION_KEY_BASE64; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Configure o segredo ${name} antes da implantação."
+              exit 1
+            fi
+          done
+          if [ -z "${PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL}" ]; then
+            echo "::error::PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL não configurado."
+            exit 1
+          fi
+      - name: Vincular projeto existente
+        run: supabase link --project-ref "${SUPABASE_PROJECT_REF}"
+      - name: Conferir migrações
+        run: supabase db push --linked --dry-run
+      - name: Aplicar migrações idempotentes
+        run: supabase db push --linked --yes
+      - name: Configurar segredos privados somente no Supabase
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://${SUPABASE_PROJECT_REF}.supabase.co/functions/v1/orcamento-api"
+          supabase secrets set \
+            "PUBLIC_EDGE_BASE_URL=${API}" \
+            "PLAY_PACKAGE_NAME=com.dkarson.orcamentoexpress" \
+            "OE_ENCRYPTION_KEY_BASE64=${OE_ENCRYPTION_KEY_BASE64}" \
+            "PLAY_SERVICE_ACCOUNT_JSON=${PLAY_SERVICE_ACCOUNT_JSON}" \
+            "PUBSUB_PUSH_AUDIENCE=${API}/v1/play/rtdn" \
+            "PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL=${PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL}" \
+            --project-ref "${SUPABASE_PROJECT_REF}"
+      - name: Implantar API pública e webhook OIDC
+        run: supabase functions deploy orcamento-api --no-verify-jwt --project-ref "${SUPABASE_PROJECT_REF}"
+      - name: Testar serviços HTTPS implantados
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://${SUPABASE_PROJECT_REF}.supabase.co/functions/v1/orcamento-api"
+          curl --fail --silent --show-error --retry 3 "${API}/health" | grep '"ok":true'
+          curl --fail --silent --show-error --retry 3 "${API}/privacy" >/dev/null
+          curl --fail --silent --show-error --retry 3 "${API}/account-deletion" >/dev/null
+          curl --fail --silent --show-error --retry 3 "${API}/app" >/dev/null
+          echo "API no ar. Login real e Google Play requerem configuração das contas externas."
