@@ -579,6 +579,13 @@ fun DashboardMetricsBanner(
                 color = Color.White, fontSize = 12.sp)
             Text("Propostas pendentes: ${Formatters.formatCurrency(metrics.pendingValue)}",
                 color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
+            Text("Custos estimados: ${Formatters.formatCurrency(metrics.estimatedCosts)}",
+                color = Color.White, fontSize = 12.sp)
+            Text("Lucro estimado: ${Formatters.formatCurrency(metrics.estimatedProfit)}",
+                color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+            Text("Baseado em ${metrics.pricedQuotesCount} proposta(s) aprovada(s) com custo registrado. " +
+                "Não inclui tributos nem custos omitidos.",
+                color = Color.White.copy(alpha = 0.68f), fontSize = 10.sp)
             Spacer(modifier = Modifier.height(9.dp))
             val scale = maxOf(1.0, metrics.totalApprovedRevenue, metrics.totalReceived, metrics.totalReceivable)
             listOf(

@@ -13,6 +13,8 @@ import com.example.data.entity.PaymentEntity
 import com.example.data.entity.ServiceOrderEntity
 import com.example.data.entity.QuoteTemplateEntity
 import com.example.data.entity.DraftQuoteEntity
+import com.example.data.entity.QuoteCostEntity
+import com.example.data.entity.AgendaEventEntity
 import com.example.data.entity.QuoteEntity
 import com.example.data.entity.QuoteItemEntity
 import com.example.data.repository.QuoteRepository
@@ -57,7 +59,7 @@ object BackupManager {
         val snapshot = repository.getDatabaseRawData()
         val root = JSONObject()
         root.put("app", "Orçamento Express")
-        root.put("version", 3)
+        root.put("version", 4)
         root.put("exportDate", System.currentTimeMillis())
         root.put("device", "${Build.MANUFACTURER} ${Build.MODEL}")
         root.put("isPreventive", isPreventive)
@@ -72,6 +74,8 @@ object BackupManager {
             put("serviceOrders", snapshot.serviceOrders.size)
             put("templates", snapshot.templates.size)
             put("drafts", snapshot.drafts.size)
+            put("quoteCosts", snapshot.quoteCosts.size)
+            put("agendaEvents", snapshot.agendaEvents.size)
         }
         root.put("counts", countsJson)
 
@@ -242,6 +246,39 @@ object BackupManager {
         }
         root.put("drafts", draftsArray)
 
+        val quoteCostsArray = JSONArray()
+        snapshot.quoteCosts.forEach { cost ->
+            quoteCostsArray.put(JSONObject().apply {
+                put("quoteId", cost.quoteId)
+                put("materialsCents", cost.materialsCents)
+                put("laborCents", cost.laborCents)
+                put("travelCents", cost.travelCents)
+                put("otherCents", cost.otherCents)
+                put("updatedAt", cost.updatedAt)
+            })
+        }
+        root.put("quoteCosts", quoteCostsArray)
+
+        val agendaArray = JSONArray()
+        snapshot.agendaEvents.forEach { event ->
+            agendaArray.put(JSONObject().apply {
+                put("id", event.id)
+                put("quoteId", event.quoteId ?: JSONObject.NULL)
+                put("kind", event.kind)
+                put("title", event.title)
+                put("clientName", event.clientName)
+                put("clientPhone", event.clientPhone)
+                put("scheduledAt", event.scheduledAt)
+                put("remindAt", event.remindAt ?: JSONObject.NULL)
+                put("remindedAt", event.remindedAt ?: JSONObject.NULL)
+                put("status", event.status)
+                put("notes", event.notes)
+                put("createdAt", event.createdAt)
+                put("updatedAt", event.updatedAt)
+            })
+        }
+        root.put("agendaEvents", agendaArray)
+
         // Save file
         val targetDir = if (isPreventive) {
             File(context.filesDir, "preventive_backups").apply { mkdirs() }
@@ -280,7 +317,7 @@ object BackupManager {
             }
 
             val backupVersion = root.optInt("version", -1)
-            if (backupVersion !in 1..3) {
+            if (backupVersion !in 1..4) {
                 return BackupValidationResult(isValid = false, errorMessage = "Versão de backup incompatível.")
             }
             if (backupVersion >= 2 && root.optJSONArray("payments") == null) {
@@ -305,6 +342,14 @@ object BackupManager {
             val ordersArray = root.optJSONArray("serviceOrders") ?: JSONArray()
             val templatesArray = root.optJSONArray("templates") ?: JSONArray()
             val draftsArray = root.optJSONArray("drafts") ?: JSONArray()
+            val costsArray = root.optJSONArray("quoteCosts") ?: JSONArray()
+            val agendaArray = root.optJSONArray("agendaEvents") ?: JSONArray()
+            if (backupVersion >= 4 &&
+                listOf("quoteCosts", "agendaEvents").any { root.optJSONArray(it) == null }) {
+                return BackupValidationResult(
+                    isValid = false, errorMessage = "Backup v4 sem os custos ou a agenda."
+                )
+            }
             if (backupVersion >= 3 && listOf("serviceOrders", "templates", "drafts").any { root.optJSONArray(it) == null }) {
                 return BackupValidationResult(isValid = false, errorMessage = "Backup incompleto: OS, modelos ou rascunhos ausentes.")
             }
@@ -320,7 +365,8 @@ object BackupManager {
             if (!hasUniquePositiveIds(clientsArr) || !hasUniquePositiveIds(prodArr) ||
                 !hasUniquePositiveIds(quotesArr) || !hasUniquePositiveIds(itemsArr) ||
                 !hasUniquePositiveIds(paymentsArr) ||
-                !hasUniquePositiveIds(ordersArray) || !hasUniquePositiveIds(templatesArray)) {
+                !hasUniquePositiveIds(ordersArray) || !hasUniquePositiveIds(templatesArray) ||
+                !hasUniquePositiveIds(agendaArray)) {
                 return BackupValidationResult(
                     isValid = false,
                     errorMessage = "Backup inválido: registros com identificadores duplicados ou ausentes."
@@ -359,6 +405,29 @@ object BackupManager {
                 val order = ordersArray.getJSONObject(i)
                 if (!quoteIds.contains(order.optLong("quoteId", -1L))) {
                     return BackupValidationResult(isValid = false, errorMessage = "OS do backup vinculada a orçamento inexistente.")
+                }
+            }
+            val costsIds = mutableSetOf<Long>()
+            for (i in 0 until costsArray.length()) {
+                val cost = costsArray.getJSONObject(i)
+                val id = cost.optLong("quoteId", -1)
+                if (id <= 0 || !quoteIds.contains(id) || !costsIds.add(id) ||
+                    listOf("materialsCents","laborCents","travelCents","otherCents")
+                        .any { cost.optLong(it, -1) < 0 }) {
+                    return BackupValidationResult(isValid = false,
+                        errorMessage = "Backup contém custos inválidos ou duplicados.")
+                }
+            }
+            for (i in 0 until agendaArray.length()) {
+                val event = agendaArray.getJSONObject(i)
+                if (!event.isNull("quoteId") &&
+                    !quoteIds.contains(event.optLong("quoteId", -1))) {
+                    return BackupValidationResult(isValid = false,
+                        errorMessage = "Compromisso aponta para orçamento inexistente.")
+                }
+                if (event.optLong("scheduledAt", 0) <= 0 || event.optString("title").isBlank()) {
+                    return BackupValidationResult(isValid = false,
+                        errorMessage = "Compromisso com data ou título inválido.")
                 }
             }
             val draftKeys = mutableSetOf<String>()
@@ -625,6 +694,42 @@ object BackupManager {
                 }
             }
 
+            val costs = mutableListOf<QuoteCostEntity>()
+            root.optJSONArray("quoteCosts")?.let { arr ->
+                for (i in 0 until arr.length()) {
+                    val row = arr.getJSONObject(i)
+                    costs.add(QuoteCostEntity(
+                        quoteId = row.getLong("quoteId"),
+                        materialsCents = row.getLong("materialsCents"),
+                        laborCents = row.getLong("laborCents"),
+                        travelCents = row.getLong("travelCents"),
+                        otherCents = row.getLong("otherCents"),
+                        updatedAt = row.optLong("updatedAt", System.currentTimeMillis())
+                    ))
+                }
+            }
+            val events = mutableListOf<AgendaEventEntity>()
+            root.optJSONArray("agendaEvents")?.let { arr ->
+                for (i in 0 until arr.length()) {
+                    val row = arr.getJSONObject(i)
+                    events.add(AgendaEventEntity(
+                        id = row.getLong("id"),
+                        quoteId = if (row.isNull("quoteId")) null else row.getLong("quoteId"),
+                        kind = row.optString("kind", "FOLLOW_UP"),
+                        title = row.getString("title"),
+                        clientName = row.optString("clientName", ""),
+                        clientPhone = row.optString("clientPhone", ""),
+                        scheduledAt = row.getLong("scheduledAt"),
+                        remindAt = if (row.isNull("remindAt")) null else row.getLong("remindAt"),
+                        remindedAt = if (row.isNull("remindedAt")) null else row.getLong("remindedAt"),
+                        status = row.optString("status", "PENDING"),
+                        notes = row.optString("notes", ""),
+                        createdAt = row.optLong("createdAt", System.currentTimeMillis()),
+                        updatedAt = row.optLong("updatedAt", System.currentTimeMillis())
+                    ))
+                }
+            }
+
             // Step 8: Execute transactional atomic restore in Room
             repository.restoreDatabaseRawData(
                 profile = profile,
@@ -636,7 +741,9 @@ object BackupManager {
                 payments = payments,
                 serviceOrders = orders,
                 templates = templates,
-                drafts = drafts
+                drafts = drafts,
+                quoteCosts = costs,
+                agendaEvents = events
             )
 
             RestoreResult(

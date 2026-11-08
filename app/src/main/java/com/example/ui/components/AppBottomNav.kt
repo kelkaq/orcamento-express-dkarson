@@ -5,10 +5,12 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Event
 import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.outlined.Business
 import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.Event
 import androidx.compose.material.icons.outlined.Inventory2
 import androidx.compose.material.icons.outlined.People
 import androidx.compose.material3.Icon
@@ -39,6 +41,14 @@ sealed class BottomNavItem(
         selectedIcon = Icons.Filled.Description,
         unselectedIcon = Icons.Outlined.Description,
         testTag = "nav_quotes"
+    )
+
+    object Agenda : BottomNavItem(
+        route = Screen.Agenda.createRoute(),
+        title = "Agenda",
+        selectedIcon = Icons.Filled.Event,
+        unselectedIcon = Icons.Outlined.Event,
+        testTag = "nav_agenda"
     )
 
     object Clients : BottomNavItem(
@@ -75,6 +85,7 @@ fun AppBottomNav(
     val items = listOf(
         BottomNavItem.Quotes,
         BottomNavItem.Clients,
+        BottomNavItem.Agenda,
         BottomNavItem.Catalog,
         BottomNavItem.Company
     )
@@ -84,7 +95,8 @@ fun AppBottomNav(
         windowInsets = WindowInsets.navigationBars
     ) {
         items.forEach { item ->
-            val isSelected = currentRoute == item.route
+            val isSelected = currentRoute == item.route ||
+                (item is BottomNavItem.Agenda && currentRoute == Screen.Agenda.route)
             NavigationBarItem(
                 selected = isSelected,
                 onClick = {

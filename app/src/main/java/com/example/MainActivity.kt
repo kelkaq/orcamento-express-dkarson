@@ -10,6 +10,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -19,6 +20,8 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.billing.EntitlementStore
 import com.example.billing.PlayBillingManager
+import com.example.cloud.CloudClient
+import com.example.jobs.AppWorkScheduler
 import com.example.data.database.AppDatabase
 import com.example.data.repository.QuoteRepository
 import com.example.ui.components.AppBottomNav
@@ -30,6 +33,8 @@ import com.example.ui.screens.quote_detail.QuoteDetailScreen
 import com.example.ui.screens.quote_edit.QuoteEditorScreen
 import com.example.ui.screens.quotes.QuotesScreen
 import com.example.ui.screens.pro.ProPlanScreen
+import com.example.ui.screens.agenda.AgendaScreen
+import com.example.ui.screens.cloud.CloudScreen
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.viewmodel.CatalogViewModel
@@ -52,12 +57,15 @@ class MainActivity : ComponentActivity() {
 
         val database = AppDatabase.getDatabase(applicationContext)
         val entitlement = EntitlementStore(applicationContext)
+        AppWorkScheduler.schedule(applicationContext)
+        val cloudClient = CloudClient(applicationContext)
         manager = PlayBillingManager(applicationContext, entitlement)
         val repository = QuoteRepository(database) { entitlement.isProNow() }
 
         setContent {
             MyApplicationTheme {
-                OrcamentoExpressApp(repository = repository, billingManager = manager)
+                OrcamentoExpressApp(repository = repository, billingManager = manager,
+                    cloudClient = cloudClient)
             }
         }
     }
@@ -74,8 +82,13 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun OrcamentoExpressApp(repository: QuoteRepository, billingManager: PlayBillingManager) {
+fun OrcamentoExpressApp(
+    repository: QuoteRepository,
+    billingManager: PlayBillingManager,
+    cloudClient: CloudClient
+) {
     val navController = rememberNavController()
+    val appContext = LocalContext.current.applicationContext
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
     val billingState by billingManager.state.collectAsStateWithLifecycle()
@@ -101,6 +114,7 @@ fun OrcamentoExpressApp(repository: QuoteRepository, billingManager: PlayBilling
         Screen.Quotes.route,
         Screen.Clients.route,
         Screen.Catalog.route,
+        Screen.Agenda.route,
         Screen.Company.route
     )
 
@@ -162,6 +176,22 @@ fun OrcamentoExpressApp(repository: QuoteRepository, billingManager: PlayBilling
                 CatalogScreen(viewModel = catalogViewModel)
             }
 
+            // Agenda local: retornos comerciais e serviços.
+            composable(
+                route = Screen.Agenda.route,
+                arguments = listOf(navArgument("quoteId") {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                })
+            ) { entry ->
+                AgendaScreen(
+                    repository = repository,
+                    initialQuoteId = entry.arguments?.getString("quoteId")?.toLongOrNull(),
+                    onViewQuote = { navController.navigate(Screen.QuoteDetail.createRoute(it)) }
+                )
+            }
+
             // Company & Settings Tab
             composable(Screen.Company.route) {
                 CompanyScreen(viewModel = companyViewModel, isPro = billingState.isPro,
@@ -169,7 +199,15 @@ fun OrcamentoExpressApp(repository: QuoteRepository, billingManager: PlayBilling
             }
 
             composable(Screen.Pro.route) {
-                ProPlanScreen(manager = billingManager, onBack = { navController.popBackStack() })
+                ProPlanScreen(manager = billingManager,
+                    onBack = { navController.popBackStack() },
+                    onOpenOnline = { navController.navigate(Screen.Cloud.route) })
+            }
+
+            composable(Screen.Cloud.route) {
+                CloudScreen(client = cloudClient, repository = repository,
+                    billingManager = billingManager,
+                    onBack = { navController.popBackStack() })
             }
 
             // Quote Editor Screen (New or Edit)
@@ -203,6 +241,7 @@ fun OrcamentoExpressApp(repository: QuoteRepository, billingManager: PlayBilling
                         navController.popBackStack()
                         navController.navigate(Screen.QuoteDetail.createRoute(savedId))
                         quotesViewModel.refreshMetrics()
+                        AppWorkScheduler.backupNow(appContext)
                     }
                 )
             }
@@ -222,6 +261,10 @@ fun OrcamentoExpressApp(repository: QuoteRepository, billingManager: PlayBilling
                     repository = repository,
                     canUsePro = billingState.isPro,
                     onUpgrade = goToPro,
+                    onCreateAgenda = { navController.navigate(Screen.Agenda.createRoute(it)) },
+                    cloudClient = cloudClient,
+                    canUseOnline = billingState.isOnline,
+                    onOpenCloud = { navController.navigate(Screen.Cloud.route) },
                     onNavigateBack = {
                         navController.popBackStack()
                         quotesViewModel.refreshMetrics()

@@ -91,6 +91,7 @@ import com.example.ui.theme.NavyPrimary
 import com.example.ui.theme.SlateLightBg
 import com.example.ui.theme.SlateMuted
 import com.example.ui.viewmodel.QuoteEditorViewModel
+import com.example.ui.components.PricingAssistantDialog
 import com.example.util.Formatters
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -117,6 +118,7 @@ fun QuoteEditorScreen(
     var catalogSearch by remember { mutableStateOf("") }
     var applyCalculatorResult by remember { mutableStateOf<((Double) -> Unit)?>(null) }
     var showStandaloneCalculator by remember { mutableStateOf(false) }
+    var showPricingAssistant by remember { mutableStateOf(false) }
     val clipboard = LocalClipboardManager.current
     val voiceLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -236,6 +238,17 @@ fun QuoteEditorScreen(
                 }
             }
 
+
+            item {
+                OutlinedButton(
+                    onClick = { if (isPro) showPricingAssistant = true else onUpgrade() },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
+                        .testTag("pricing_by_profession")
+                ) {
+                    Text(if (isPro) "CALCULAR PREÇO E LUCRO POR PROFISSÃO"
+                        else "PREÇO E LUCRO POR PROFISSÃO • PRO")
+                }
+            }
 
             // Header: Quote Number & Status
             item {
@@ -496,6 +509,20 @@ fun QuoteEditorScreen(
                     onRemove = { viewModel.removeItem(index) },
                     onOpenCalculator = { apply -> applyCalculatorResult = apply }
                 )
+            }
+
+            if (isPro && uiState.estimatedCosts != null) {
+                item {
+                    val estimate = uiState.estimatedCosts!!
+                    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 5.dp)) {
+                        Text("Controle interno de custos (não aparece no PDF)",
+                            fontWeight = FontWeight.Bold, color = NavyPrimary)
+                        Text("Custos estimados: ${Formatters.formatCurrency(estimate.totalCents / 100.0)}")
+                        Text("Lucro estimado antes de impostos: ${Formatters.formatCurrency(uiState.total - estimate.totalCents / 100.0)}")
+                        Text("A estimativa é baseada nos dados inseridos; confira se todos os itens possuem seus custos.",
+                            fontSize = 11.sp, color = SlateMuted)
+                    }
+                }
             }
 
             // Financial Summary Card
@@ -879,6 +906,16 @@ fun QuoteEditorScreen(
                 Spacer(modifier = Modifier.height(24.dp))
             }
         }
+    }
+
+    if (showPricingAssistant) {
+        PricingAssistantDialog(
+            onDismiss = { showPricingAssistant = false },
+            onApply = { suggestion ->
+                viewModel.addPricedItem(suggestion)
+                showPricingAssistant = false
+            }
+        )
     }
 
     if (showStandaloneCalculator) {

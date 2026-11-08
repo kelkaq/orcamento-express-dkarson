@@ -10,6 +10,7 @@ permissions:
 env:
   # URL pública (sem credenciais) do servidor de verificação seguro.
   BILLING_VERIFY_URL: ${{ vars.BILLING_VERIFY_URL }}
+  CLOUD_API_URL: ${{ vars.CLOUD_API_URL }}
 
 # Evita compilar commits antigos repetidamente: só a revisão mais recente permanece ativa.
 concurrency:

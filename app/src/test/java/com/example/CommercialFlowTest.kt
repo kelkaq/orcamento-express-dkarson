@@ -106,7 +106,7 @@ class CommercialFlowTest {
 
         val exported = BackupManager.exportBackup(context, repo)
         val root = JSONObject(exported.readText())
-        assertEquals(3, root.getInt("version"))
+        assertEquals(4, root.getInt("version"))
         assertEquals(1, root.getJSONArray("payments").length())
         assertEquals(1, root.getJSONArray("serviceOrders").length())
         assertEquals(1, root.getJSONArray("templates").length())

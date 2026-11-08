@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Central Online — Orçamento Express DKARSON</title>
+<link rel="stylesheet" href="/style.css"></head>
+<body><main>
+<header><p>DKARSON</p><h1>Orçamento Express — Central Online</h1>
+<p>Acompanhe seus orçamentos pela internet. Dados privados acessíveis somente após confirmação por e-mail e assinatura Online.</p></header>
+<section id="login">
+<h2>Entrar com código</h2>
+<label>E-mail<input id="email" type="email" autocomplete="email" maxlength="254" required></label>
+<button id="request" type="button">Receber código por e-mail</button>
+<div id="codeBox" hidden><label>Código de seis dígitos
+<input id="code" maxlength="6" inputmode="numeric" pattern="[0-9]{6}"></label>
+<button id="confirm" type="button">Entrar</button></div>
+</section>
+<section id="dashboard" hidden>
+<div class="toolbar"><h2>Meus orçamentos</h2><button type="button" id="refresh">Atualizar</button>
+<button type="button" id="logout">Sair</button></div>
+<p>Consulta somente leitura no navegador. Para criar e editar orçamentos, utilize o aplicativo Android.</p>
+<p id="revision"></p>
+<div id="quotes" role="region" aria-live="polite"></div>
+</section>
+<p id="notice" role="status" aria-live="polite"></p>
+<footer>Seus orçamentos são privados. O link público de aprovação só é gerado quando você solicita no aplicativo.</footer>
+</main><script src="/app.js" defer></script></body></html>

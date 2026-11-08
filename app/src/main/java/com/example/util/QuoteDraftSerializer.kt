@@ -1,6 +1,7 @@
 package com.example.util
 
 import com.example.data.entity.QuoteItemEntity
+import com.example.data.entity.QuoteCostEntity
 import com.example.ui.viewmodel.QuoteEditorUiState
 import org.json.JSONArray
 import org.json.JSONObject
@@ -29,6 +30,14 @@ object QuoteDraftSerializer {
         put("paymentTerms", s.paymentTerms)
         put("paymentMethod", s.paymentMethod)
         put("notes", s.notes)
+        put("estimatedCosts", s.estimatedCosts?.let { costs ->
+            JSONObject().apply {
+                put("materialsCents", costs.materialsCents)
+                put("laborCents", costs.laborCents)
+                put("travelCents", costs.travelCents)
+                put("otherCents", costs.otherCents)
+            }
+        } ?: JSONObject.NULL)
         put("items", JSONArray().also { arr ->
             s.items.forEach { item ->
                 arr.put(JSONObject().apply {
@@ -76,6 +85,15 @@ object QuoteDraftSerializer {
             validUntil = root.optLong("validUntil", fallback.validUntil),
             status = root.optString("status", "PENDING"),
             items = items,
+            estimatedCosts = root.optJSONObject("estimatedCosts")?.let { obj ->
+                QuoteCostEntity(
+                    quoteId = fallback.quoteId,
+                    materialsCents = obj.optLong("materialsCents", 0L),
+                    laborCents = obj.optLong("laborCents", 0L),
+                    travelCents = obj.optLong("travelCents", 0L),
+                    otherCents = obj.optLong("otherCents", 0L)
+                )
+            },
             discountType = root.optString("discountType", "FIXED"),
             discountValue = root.optDouble("discountValue", 0.0),
             shippingFee = root.optDouble("shippingFee", 0.0),

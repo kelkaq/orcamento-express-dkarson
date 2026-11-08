@@ -6,6 +6,7 @@ import java.util.Calendar
 object PlanPolicy {
     const val FREE_QUOTES_PER_MONTH = 5
     const val PRODUCT_ID = "orcamento_express_pro_mensal"
+    const val OFFLINE_PRODUCT_ID = "orcamento_express_pro_offline"
     const val BASE_PLAN_ID = "mensal"
 
     fun currentMonthBounds(now: Long = System.currentTimeMillis()): Pair<Long, Long> {

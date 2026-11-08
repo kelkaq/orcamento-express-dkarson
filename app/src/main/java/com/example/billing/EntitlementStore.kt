@@ -4,44 +4,70 @@ import android.content.Context
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
+enum class PlanTier { FREE, OFFLINE, ONLINE }
+
 /**
- * O Pro só é concedido após validação na API Google Play pelo backend seguro.
- * Cache de no máximo 72h para uso offline, sem ultrapassar o vencimento confirmado.
- * Nenhum sinal de compra local, flag de debug ou preferência do usuário ativa o Pro.
+ * Aquisições só são concedidas por resultado validado no backend via Google Play API.
+ * Compra única é vitalícia (salvo reembolso detectado em restauração).
+ * Assinatura online mantém cache offline por até 72 horas e nunca além da expiração.
  */
 class EntitlementStore(context: Context) {
-    private val preferences = context.applicationContext
-        .getSharedPreferences("dkarson_verified_entitlement_v1", Context.MODE_PRIVATE)
-
-    private val _pro = MutableStateFlow(isProNow())
-    val pro: StateFlow<Boolean> = _pro
-
-    @Synchronized
-    fun isProNow(now: Long = System.currentTimeMillis()): Boolean {
-        val expiry = preferences.getLong("expiry", 0L)
-        val checkedAt = preferences.getLong("checked", 0L)
-        val cacheAge = now - checkedAt
-        return expiry > now && checkedAt > 0L &&
-            cacheAge >= -300_000L && cacheAge <= 72L * 60L * 60L * 1_000L
-    }
+    private val prefs = context.applicationContext
+        .getSharedPreferences("dkarson_entitlement_v2", Context.MODE_PRIVATE)
+    private val _tier = MutableStateFlow(tierNow())
+    val tier: StateFlow<PlanTier> = _tier
 
     @Synchronized
-    fun grantVerified(expiry: Long, now: Long = System.currentTimeMillis()) {
-        if (expiry <= now) {
-            revoke()
-            return
-        }
-        preferences.edit().putLong("expiry", expiry).putLong("checked", now).apply()
-        _pro.value = isProNow(now)
+    fun hasOfflinePurchase(): Boolean = prefs.getBoolean("one_time_verified", false)
+
+    @Synchronized
+    fun isOnlineNow(now: Long = System.currentTimeMillis()): Boolean {
+        val expiry = prefs.getLong("online_expiry", 0L)
+        val verifiedAt = prefs.getLong("online_checked", 0L)
+        val age = now - verifiedAt
+        return expiry > now && verifiedAt > 0 &&
+            age >= -300_000L && age <= 72L * 60L * 60L * 1_000L
     }
 
     @Synchronized
-    fun revoke() {
-        preferences.edit().remove("expiry").remove("checked").apply()
-        _pro.value = false
+    fun isProNow(): Boolean = hasOfflinePurchase() || isOnlineNow()
+
+    @Synchronized
+    fun tierNow(): PlanTier = when {
+        isOnlineNow() -> PlanTier.ONLINE
+        hasOfflinePurchase() -> PlanTier.OFFLINE
+        else -> PlanTier.FREE
     }
 
-    fun refreshLocalState() {
-        _pro.value = isProNow()
+    private fun refresh() { _tier.value = tierNow() }
+
+    @Synchronized
+    fun grantOfflineVerified() {
+        prefs.edit().putBoolean("one_time_verified", true).apply()
+        refresh()
     }
+
+    @Synchronized
+    fun revokeOffline() {
+        prefs.edit().remove("one_time_verified").apply()
+        refresh()
+    }
+
+    @Synchronized
+    fun grantOnlineVerified(expiry: Long, now: Long = System.currentTimeMillis()) {
+        if (expiry <= now) { revokeOnline(); return }
+        prefs.edit()
+            .putLong("online_expiry", expiry)
+            .putLong("online_checked", now)
+            .apply()
+        refresh()
+    }
+
+    @Synchronized
+    fun revokeOnline() {
+        prefs.edit().remove("online_expiry").remove("online_checked").apply()
+        refresh()
+    }
+
+    fun refreshLocalState() = refresh()
 }

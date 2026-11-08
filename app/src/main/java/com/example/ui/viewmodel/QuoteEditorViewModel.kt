@@ -8,6 +8,9 @@ import com.example.data.entity.CompanyProfileEntity
 import com.example.data.entity.ProductServiceEntity
 import com.example.data.entity.QuoteEntity
 import com.example.data.entity.QuoteItemEntity
+import com.example.data.entity.QuoteCostEntity
+import com.example.ui.components.PricedItemSuggestion
+import com.example.pricing.PricingEngine
 import com.example.billing.FreePlanLimitException
 import com.example.billing.ProRequiredException
 import com.example.data.entity.QuoteTemplateEntity
@@ -38,6 +41,7 @@ data class QuoteEditorUiState(
     val validUntil: Long = System.currentTimeMillis() + (15L * 24 * 60 * 60 * 1000),
     val status: String = "PENDING",
     val items: List<QuoteItemEntity> = emptyList(),
+    val estimatedCosts: QuoteCostEntity? = null,
     val discountType: String = "FIXED", // FIXED or PERCENTAGE
     val discountValue: Double = 0.0,
     val shippingFee: Double = 0.0,
@@ -111,6 +115,7 @@ class QuoteEditorViewModel(
                         validUntil = q.validUntil,
                         status = q.status,
                         items = existing.items,
+                        estimatedCosts = repository.getQuoteCosts(q.id),
                         discountType = q.discountType,
                         discountValue = q.discountValue,
                         shippingFee = q.shippingFee,
@@ -261,6 +266,39 @@ class QuoteEditorViewModel(
         recalculateTotals()
     }
 
+    /**
+     * Cria item completo usando os custos informados pelo prestador,
+     * acumulando estimativas que nunca aparecem no PDF do cliente.
+     */
+    fun addPricedItem(suggestion: PricedItemSuggestion) {
+        val calculation = suggestion.calculation
+        val items = _uiState.value.items.toMutableList()
+        if (items.size == 1 && items.first().description.isBlank()) items.clear()
+        items.add(QuoteItemEntity(
+            quoteId = _uiState.value.quoteId,
+            description = suggestion.description,
+            unit = suggestion.unit,
+            type = "SERVICE",
+            quantity = calculation.quantity,
+            unitPrice = calculation.unitPrice,
+            totalPrice = com.example.util.FinancialCalculator.calculateItemTotal(
+                calculation.quantity, calculation.unitPrice
+            )
+        ))
+        val previous = _uiState.value.estimatedCosts
+            ?: QuoteCostEntity(quoteId = _uiState.value.quoteId)
+        _uiState.value = _uiState.value.copy(
+            items = items,
+            estimatedCosts = previous.copy(
+                materialsCents = Math.addExact(previous.materialsCents, PricingEngine.cents(calculation.materials)),
+                laborCents = Math.addExact(previous.laborCents, PricingEngine.cents(calculation.labor)),
+                travelCents = Math.addExact(previous.travelCents, PricingEngine.cents(calculation.travel)),
+                otherCents = Math.addExact(previous.otherCents, PricingEngine.cents(calculation.other))
+            )
+        )
+        recalculateTotals()
+    }
+
     // Items Manipulation
     fun addItem() {
         val currentItems = _uiState.value.items.toMutableList()
@@ -397,7 +435,7 @@ class QuoteEditorViewModel(
                     notes = state.notes.trim()
                 )
 
-                val savedId = repository.saveQuoteWithItems(quoteEntity, validItems)
+                val savedId = repository.saveQuoteWithItems(quoteEntity, validItems, state.estimatedCosts)
                 repository.clearDraft(draftKey)
                 _uiState.value = _uiState.value.copy(
                     isSaving = false,

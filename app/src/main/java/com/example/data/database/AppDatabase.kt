@@ -14,6 +14,8 @@ import com.example.data.dao.PaymentDao
 import com.example.data.dao.ServiceOrderDao
 import com.example.data.dao.QuoteTemplateDao
 import com.example.data.dao.DraftQuoteDao
+import com.example.data.dao.QuoteCostDao
+import com.example.data.dao.AgendaEventDao
 import com.example.data.dao.QuoteSequenceDao
 import com.example.data.entity.ClientEntity
 import com.example.data.entity.CompanyProfileEntity
@@ -25,6 +27,8 @@ import com.example.data.entity.PaymentEntity
 import com.example.data.entity.ServiceOrderEntity
 import com.example.data.entity.QuoteTemplateEntity
 import com.example.data.entity.DraftQuoteEntity
+import com.example.data.entity.QuoteCostEntity
+import com.example.data.entity.AgendaEventEntity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -40,9 +44,11 @@ import kotlinx.coroutines.launch
         PaymentEntity::class,
         ServiceOrderEntity::class,
         QuoteTemplateEntity::class,
-        DraftQuoteEntity::class
+        DraftQuoteEntity::class,
+        QuoteCostEntity::class,
+        AgendaEventEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -53,6 +59,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun serviceOrderDao(): ServiceOrderDao
     abstract fun quoteTemplateDao(): QuoteTemplateDao
     abstract fun draftQuoteDao(): DraftQuoteDao
+    abstract fun quoteCostDao(): QuoteCostDao
+    abstract fun agendaEventDao(): AgendaEventDao
     abstract fun quoteDao(): QuoteDao
     abstract fun quoteSequenceDao(): QuoteSequenceDao
 
@@ -128,6 +136,44 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** Persistência não destrutiva de custos e agenda — mantém todos os orçamentos. */
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """CREATE TABLE IF NOT EXISTS `quote_costs` (
+                        `quoteId` INTEGER NOT NULL,
+                        `materialsCents` INTEGER NOT NULL,
+                        `laborCents` INTEGER NOT NULL,
+                        `travelCents` INTEGER NOT NULL,
+                        `otherCents` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`quoteId`),
+                        FOREIGN KEY(`quoteId`) REFERENCES `quotes`(`id`)
+                        ON UPDATE NO ACTION ON DELETE CASCADE
+                    )""".trimIndent()
+                )
+                db.execSQL(
+                    """CREATE TABLE IF NOT EXISTS `agenda_events` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `quoteId` INTEGER,
+                        `kind` TEXT NOT NULL,
+                        `title` TEXT NOT NULL,
+                        `clientName` TEXT NOT NULL,
+                        `clientPhone` TEXT NOT NULL,
+                        `scheduledAt` INTEGER NOT NULL,
+                        `remindAt` INTEGER,
+                        `remindedAt` INTEGER,
+                        `status` TEXT NOT NULL,
+                        `notes` TEXT NOT NULL,
+                        `createdAt` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL
+                    )""".trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_agenda_events_scheduledAt` ON `agenda_events` (`scheduledAt`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_agenda_events_quoteId` ON `agenda_events` (`quoteId`)")
+            }
+        }
+
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -135,7 +181,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "orcamento_express.db"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                     .addCallback(object : Callback() {
                         override fun onCreate(db: SupportSQLiteDatabase) {
                             super.onCreate(db)

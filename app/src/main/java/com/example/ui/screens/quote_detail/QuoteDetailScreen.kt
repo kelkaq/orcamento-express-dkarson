@@ -70,6 +70,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.entity.CompanyProfileEntity
 import com.example.data.entity.PaymentEntity
 import com.example.data.entity.ServiceOrderEntity
+import com.example.data.entity.QuoteCostEntity
+import com.example.cloud.CloudClient
 import com.example.util.ServiceOrderPdfGenerator
 import com.example.data.entity.QuoteWithItems
 import com.example.data.repository.QuoteRepository
@@ -97,6 +99,10 @@ fun QuoteDetailScreen(
     onEditQuote: (Long) -> Unit,
     canUsePro: Boolean = false,
     onUpgrade: () -> Unit = {},
+    onCreateAgenda: (Long) -> Unit = {},
+    cloudClient: CloudClient? = null,
+    canUseOnline: Boolean = false,
+    onOpenCloud: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -107,6 +113,13 @@ fun QuoteDetailScreen(
     var companyProfile by remember { mutableStateOf(CompanyProfileEntity()) }
     var isLoading by remember { mutableStateOf(true) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    var showCostDialog by remember { mutableStateOf(false) }
+    var costMaterials by remember { mutableStateOf("") }
+    var costLabor by remember { mutableStateOf("") }
+    var costTravel by remember { mutableStateOf("") }
+    var costOther by remember { mutableStateOf("") }
+    val costFlow = remember(quoteId) { repository.observeQuoteCosts(quoteId) }
+    val costRecord by costFlow.collectAsStateWithLifecycle(initialValue = null)
     var showServiceOrderDialog by remember { mutableStateOf(false) }
     var showTemplateDialog by remember { mutableStateOf(false) }
     var templateName by remember { mutableStateOf("") }
@@ -339,6 +352,86 @@ fun QuoteDetailScreen(
                         Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text("WhatsApp")
+                    }
+                }
+            }
+
+            // A agenda pertence ao fluxo comercial e pode ser usada gratuitamente.
+            item {
+                OutlinedButton(
+                    onClick = { onCreateAgenda(quoteId) },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 5.dp)
+                        .testTag("quote_schedule_followup")
+                ) { Text("Agendar serviço ou retorno ao cliente") }
+            }
+
+            if (quote.status == "PENDING") {
+                item {
+                    OutlinedButton(
+                        onClick = {
+                            val cloud = cloudClient
+                            if (!canUseOnline || cloud == null || !cloud.configured || !cloud.isLoggedIn()) {
+                                onOpenCloud()
+                            } else {
+                                scope.launch {
+                                    try {
+                                        val url = cloud.createApprovalLink(data)
+                                        val share = Intent(Intent.ACTION_SEND).apply {
+                                            type = "text/plain"
+                                            putExtra(Intent.EXTRA_TEXT,
+                                                "Olá! Segue o link para analisar e responder ao orçamento " +
+                                                "${quote.quoteNumber}: " + url)
+                                        }
+                                        context.startActivity(Intent.createChooser(share,
+                                            "Compartilhar link de aprovação"))
+                                    } catch (e: Exception) {
+                                        snackbarHostState.showSnackbar(
+                                            e.localizedMessage ?: "Não foi possível criar o link."
+                                        )
+                                    }
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 5.dp)
+                            .testTag("share_approval_link")
+                    ) {
+                        Text(if (canUseOnline) "Enviar link de aprovação ao cliente"
+                            else "Aprovação online por link • Pro Online")
+                    }
+                }
+            }
+
+            // Custos internos: nunca saem no PDF do cliente.
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(Modifier.padding(14.dp)) {
+                        Text("Custos e lucro do serviço", fontWeight = FontWeight.Bold, color = NavyPrimary)
+                        costRecord?.let { costs ->
+                            Text("Materiais: ${Formatters.formatCurrency(costs.materialsCents / 100.0)}")
+                            Text("Mão de obra: ${Formatters.formatCurrency(costs.laborCents / 100.0)}")
+                            Text("Deslocamento: ${Formatters.formatCurrency(costs.travelCents / 100.0)}")
+                            Text("Outros custos: ${Formatters.formatCurrency(costs.otherCents / 100.0)}")
+                            Text("Custo total: ${Formatters.formatCurrency(costs.totalCents / 100.0)}")
+                            Text("Lucro estimado: ${Formatters.formatCurrency(quote.total - costs.totalCents / 100.0)}",
+                                fontWeight = FontWeight.Bold)
+                            Text("Antes de impostos e despesas não informadas. Estes valores não aparecem no PDF.",
+                                fontSize = 11.sp, color = SlateMuted)
+                        } ?: Text("Informe os custos para acompanhar o lucro deste serviço.", color = SlateMuted)
+                        OutlinedButton(onClick = {
+                            if (!canUsePro) onUpgrade() else {
+                                val costs = costRecord
+                                costMaterials = costs?.let { BigDecimal.valueOf(it.materialsCents, 2).toPlainString() }.orEmpty()
+                                costLabor = costs?.let { BigDecimal.valueOf(it.laborCents, 2).toPlainString() }.orEmpty()
+                                costTravel = costs?.let { BigDecimal.valueOf(it.travelCents, 2).toPlainString() }.orEmpty()
+                                costOther = costs?.let { BigDecimal.valueOf(it.otherCents, 2).toPlainString() }.orEmpty()
+                                showCostDialog = true
+                            }
+                        }, modifier = Modifier.fillMaxWidth().testTag("edit_real_costs")) {
+                            Text(if (canUsePro) "Registrar / corrigir custos" else "Custos e lucro • Pro")
+                        }
                     }
                 }
             }
@@ -652,6 +745,57 @@ fun QuoteDetailScreen(
                 Spacer(modifier = Modifier.height(32.dp))
             }
         }
+    }
+
+    if (showCostDialog) {
+        AlertDialog(
+            onDismissRequest = { showCostDialog = false },
+            title = { Text("Custos deste orçamento") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf(
+                        Triple("Materiais (R$)", costMaterials, { v: String -> costMaterials = v }),
+                        Triple("Mão de obra (R$)", costLabor, { v: String -> costLabor = v }),
+                        Triple("Deslocamento (R$)", costTravel, { v: String -> costTravel = v }),
+                        Triple("Outros (R$)", costOther, { v: String -> costOther = v })
+                    ).forEach { (label, value, setter) ->
+                        OutlinedTextField(
+                            value = value, onValueChange = setter,
+                            label = { Text(label) }, singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    scope.launch {
+                        try {
+                            fun read(text: String): Long {
+                                val normalized = text.trim().let {
+                                    if (',' in it) it.replace(".", "").replace(',', '.') else it
+                                }
+                                return com.example.pricing.PricingEngine.cents(
+                                    normalized.toDoubleOrNull() ?: 0.0
+                                )
+                            }
+                            repository.saveQuoteCosts(
+                                quoteId, read(costMaterials), read(costLabor),
+                                read(costTravel), read(costOther)
+                            )
+                            showCostDialog = false
+                            snackbarHostState.showSnackbar("Custos atualizados.")
+                        } catch (e: Exception) {
+                            snackbarHostState.showSnackbar(e.localizedMessage ?: "Custos inválidos.")
+                        }
+                    }
+                }) { Text("Salvar custos") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCostDialog = false }) { Text("Cancelar") }
+            }
+        )
     }
 
     val orderQuote = quoteWithItems?.quote

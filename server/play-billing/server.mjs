@@ -3,6 +3,7 @@ import {GoogleAuth} from 'google-auth-library';
 
 const packageName = process.env.PLAY_PACKAGE_NAME || '';
 const productId = process.env.PLAY_PRODUCT_ID || 'orcamento_express_pro_mensal';
+const oneTimeProductId = process.env.PLAY_ONE_TIME_PRODUCT_ID || 'orcamento_express_pro_offline';
 const port = Number(process.env.PORT || 8088);
 if (!/^com\.[a-zA-Z0-9_.]+$/.test(packageName)) {
   throw new Error('Configure PLAY_PACKAGE_NAME no ambiente.');
@@ -27,6 +28,26 @@ async function googleGet(token) {
   const response = await fetch(url,{headers:{Authorization:'Bearer '+key}});
   if(!response.ok) throw new Error('Verificação Google Play falhou.');
   return response.json();
+}
+async function googleGetOneTime(token) {
+  const key = await getToken();
+  const url = 'https://androidpublisher.googleapis.com/androidpublisher/v3/applications/' +
+    encodeURIComponent(packageName) + '/purchases/products/' +
+    encodeURIComponent(oneTimeProductId) + '/tokens/' + encodeURIComponent(token);
+  const response = await fetch(url, {headers:{Authorization:'Bearer '+key}});
+  if(!response.ok) throw new Error('Compra única não confirmada na Google Play.');
+  return response.json();
+}
+async function acknowledgeOneTime(token) {
+  const key = await getToken();
+  const url = 'https://androidpublisher.googleapis.com/androidpublisher/v3/applications/' +
+    encodeURIComponent(packageName) + '/purchases/products/' +
+    encodeURIComponent(oneTimeProductId) + '/tokens/' + encodeURIComponent(token) + ':acknowledge';
+  const response = await fetch(url,{
+    method:'POST', headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},
+    body:'{}'
+  });
+  if(!response.ok) throw new Error('Falha ao reconhecer compra única.');
 }
 async function acknowledge(token) {
   const key = await getToken();
@@ -76,17 +97,27 @@ const server=createServer(async(req,res)=>{
       raw += chunk.toString('utf8');
       if(raw.length>8192) {res.writeHead(413);return res.end();}
     }
-    const {purchaseToken}=JSON.parse(raw);
-    if(typeof purchaseToken!=='string'||purchaseToken.length<16||purchaseToken.length>4096) {
+    const {purchaseToken,type='subscription'}=JSON.parse(raw);
+    if(typeof purchaseToken!=='string'||purchaseToken.length<16||purchaseToken.length>4096 ||
+       !['subscription','one_time'].includes(type)) {
       res.writeHead(400);return res.end();
     }
-    const data=await googleGet(purchaseToken);
-    const subscription=evaluateSubscription(data);
-    if(subscription.active && data.acknowledgementState==='ACKNOWLEDGEMENT_STATE_PENDING') {
-      await acknowledge(purchaseToken);
+    let result;
+    if(type==='one_time') {
+      const purchase=await googleGetOneTime(purchaseToken);
+      const active=purchase.purchaseState===0 && purchase.consumptionState!==1;
+      if(active && purchase.acknowledgementState===0) await acknowledgeOneTime(purchaseToken);
+      result={active,lifetime:active,productId:oneTimeProductId};
+    } else {
+      const data=await googleGet(purchaseToken);
+      const subscription=evaluateSubscription(data);
+      if(subscription.active && data.acknowledgementState==='ACKNOWLEDGEMENT_STATE_PENDING') {
+        await acknowledge(purchaseToken);
+      }
+      result={...subscription,lifetime:false,productId};
     }
     res.writeHead(200,{'Content-Type':'application/json'});
-    return res.end(JSON.stringify(subscription));
+    return res.end(JSON.stringify(result));
   } catch (error) {
     // Nunca registrar token de compra nem credenciais em logs.
     console.error('Falha na verificação:',error?.message || 'erro desconhecido');

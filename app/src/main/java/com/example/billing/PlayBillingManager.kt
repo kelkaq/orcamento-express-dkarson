@@ -26,17 +26,22 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 data class BillingDisplayState(
+    val tier: PlanTier = PlanTier.FREE,
     val isPro: Boolean = false,
+    val isOnline: Boolean = false,
     val isLoading: Boolean = true,
-    val canSubscribe: Boolean = false,
-    val price: String? = null,
+    val canBuyOffline: Boolean = false,
+    val canSubscribeOnline: Boolean = false,
+    val offlinePrice: String? = null,
+    val onlinePrice: String? = null,
     val message: String = "Consultando a Google Play...",
     val purchasePending: Boolean = false
 )
 
 /**
- * Cobrança real pela Google Play. O APK de debug tem package diferente e não
- * consegue realizar compras de produção: use o AAB release distribuído pelo Play.
+ * Os produtos estão definidos na Google Play, não no APK.
+ * Nunca libera uma compra apenas pelo callback de compra: o verificador privado
+ * consulta a API Android Publisher e reconhece a transação com segurança.
  */
 class PlayBillingManager(
     context: Context,
@@ -44,11 +49,22 @@ class PlayBillingManager(
 ) : PurchasesUpdatedListener {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val verifyUrl = BuildConfig.BILLING_VERIFY_URL
-    private val _state = MutableStateFlow(BillingDisplayState(isPro = entitlement.isProNow()))
+    private val _state = MutableStateFlow(
+        BillingDisplayState(
+            tier = entitlement.tierNow(),
+            isPro = entitlement.isProNow(),
+            isOnline = entitlement.isOnlineNow()
+        )
+    )
     val state: StateFlow<BillingDisplayState> = _state
 
-    private var details: ProductDetails? = null
-    private var offerToken: String? = null
+    private var offlineDetails: ProductDetails? = null
+    private var offlineOffer: String? = null
+    private var onlineDetails: ProductDetails? = null
+    private var onlineOffer: String? = null
+    @Volatile private var confirmedOnlinePurchaseToken: String? = null
+    fun onlinePurchaseToken(): String? = confirmedOnlinePurchaseToken
+
     private val client = BillingClient.newBuilder(context.applicationContext)
         .setListener(this)
         .enablePendingPurchases(
@@ -57,122 +73,138 @@ class PlayBillingManager(
         .enableAutoServiceReconnection()
         .build()
 
-    init {
-        connect()
-    }
+    init { connect() }
 
-    private fun update(message: String? = null, loading: Boolean? = null, pending: Boolean? = null) {
-        val current = _state.value
-        _state.value = current.copy(
+    private fun refresh(
+        message: String? = null,
+        loading: Boolean? = null,
+        pending: Boolean? = null
+    ) {
+        entitlement.refreshLocalState()
+        val old = _state.value
+        _state.value = old.copy(
+            tier = entitlement.tierNow(),
             isPro = entitlement.isProNow(),
-            isLoading = loading ?: current.isLoading,
-            canSubscribe = details != null && offerToken != null &&
-                verifyUrl.startsWith("https://"),
-            message = message ?: current.message,
-            purchasePending = pending ?: current.purchasePending
+            isOnline = entitlement.isOnlineNow(),
+            isLoading = loading ?: old.isLoading,
+            canBuyOffline = offlineDetails != null && offlineOffer != null &&
+                verifyUrl.startsWith("https://") && !entitlement.hasOfflinePurchase(),
+            canSubscribeOnline = onlineDetails != null && onlineOffer != null &&
+                verifyUrl.startsWith("https://") && !entitlement.isOnlineNow(),
+            message = message ?: old.message,
+            purchasePending = pending ?: old.purchasePending
         )
     }
 
     private fun connect() {
+        if (client.isReady) return
         client.startConnection(object : BillingClientStateListener {
             override fun onBillingSetupFinished(result: BillingResult) {
                 if (result.responseCode == BillingClient.BillingResponseCode.OK) {
-                    queryProduct()
+                    queryProducts()
                     restorePurchases()
-                } else {
-                    update("Google Play indisponível: ${result.debugMessage}", loading = false)
-                }
+                } else refresh("Google Play indisponível: ${result.debugMessage}", loading = false)
             }
             override fun onBillingServiceDisconnected() {
-                update("Sem conexão com a Google Play. Tente atualizar novamente.", loading = false)
+                refresh("A Google Play desconectou. Abra Planos para tentar novamente.", loading = false)
             }
         })
     }
 
-    private fun queryProduct() {
-        val product = QueryProductDetailsParams.Product.newBuilder()
-            .setProductId(PlanPolicy.PRODUCT_ID)
-            .setProductType(BillingClient.ProductType.SUBS)
-            .build()
+    private fun queryProducts() {
+        val products = listOf(
+            QueryProductDetailsParams.Product.newBuilder()
+                .setProductId(PlanPolicy.OFFLINE_PRODUCT_ID)
+                .setProductType(BillingClient.ProductType.INAPP).build(),
+            QueryProductDetailsParams.Product.newBuilder()
+                .setProductId(PlanPolicy.PRODUCT_ID)
+                .setProductType(BillingClient.ProductType.SUBS).build()
+        )
         client.queryProductDetailsAsync(
-            QueryProductDetailsParams.newBuilder().setProductList(listOf(product)).build()
+            QueryProductDetailsParams.newBuilder().setProductList(products).build()
         ) { result, response ->
             val found = if (result.responseCode == BillingClient.BillingResponseCode.OK)
-                response.productDetailsList.firstOrNull { it.productId == PlanPolicy.PRODUCT_ID }
-            else null
-            val offer = found?.subscriptionOfferDetails
+                response.productDetailsList else emptyList()
+
+            val offline = found.firstOrNull { it.productId == PlanPolicy.OFFLINE_PRODUCT_ID }
+            val off = offline?.oneTimePurchaseOfferDetailsList?.firstOrNull()
+            offlineDetails = if (off != null) offline else null
+            offlineOffer = off?.offerToken
+
+            val online = found.firstOrNull { it.productId == PlanPolicy.PRODUCT_ID }
+            val sub = online?.subscriptionOfferDetails
                 ?.firstOrNull { it.basePlanId == PlanPolicy.BASE_PLAN_ID }
-            details = if (offer != null) found else null
-            offerToken = offer?.offerToken
-            val visiblePrice = offer?.pricingPhases?.pricingPhaseList?.lastOrNull()?.formattedPrice
+            onlineDetails = if (sub != null) online else null
+            onlineOffer = sub?.offerToken
+
             _state.value = _state.value.copy(
-                isPro = entitlement.isProNow(),
-                price = visiblePrice,
-                canSubscribe = offerToken != null && verifyUrl.startsWith("https://"),
-                isLoading = false,
-                message = when {
-                    !verifyUrl.startsWith("https://") ->
-                        "A verificação de pagamentos ainda precisa ser ativada pelo desenvolvedor."
-                    details == null -> "O plano Pro ainda não está disponível para esta conta da Google Play."
-                    else -> "Preço e período apresentados pela Google Play."
-                }
+                offlinePrice = off?.formattedPrice,
+                onlinePrice = sub?.pricingPhases?.pricingPhaseList?.lastOrNull()?.formattedPrice
+            )
+            refresh(
+                if (!verifyUrl.startsWith("https://"))
+                    "O desenvolvedor ainda não habilitou a verificação de pagamentos."
+                else if (offlineDetails == null && onlineDetails == null)
+                    "Planos ainda não cadastrados ou não disponíveis para este usuário da Google Play."
+                else "Preços oficiais consultados na Google Play.",
+                loading = false
             )
         }
     }
 
-    fun buy(activity: Activity) {
-        val d = details
-        val offer = offerToken
-        if (d == null || offer == null || !verifyUrl.startsWith("https://")) {
-            update("O plano não está habilitado. Confira as configurações da Google Play.")
+    fun buyOffline(activity: Activity) = launchPurchase(activity, offlineDetails, offlineOffer)
+    fun buyOnline(activity: Activity) = launchPurchase(activity, onlineDetails, onlineOffer)
+
+    private fun launchPurchase(activity: Activity, details: ProductDetails?, token: String?) {
+        if (details == null || token == null || !verifyUrl.startsWith("https://")) {
+            refresh("Compra indisponível. Confira produtos e verificador na Google Play.")
             return
         }
-        val productParams = BillingFlowParams.ProductDetailsParams.newBuilder()
-            .setProductDetails(d).setOfferToken(offer).build()
+        val params = BillingFlowParams.ProductDetailsParams.newBuilder()
+            .setProductDetails(details).setOfferToken(token).build()
         val result = client.launchBillingFlow(
             activity,
-            BillingFlowParams.newBuilder()
-                .setProductDetailsParamsList(listOf(productParams))
-                .build()
+            BillingFlowParams.newBuilder().setProductDetailsParamsList(listOf(params)).build()
         )
         if (result.responseCode != BillingClient.BillingResponseCode.OK) {
-            update("Não foi possível abrir a compra: ${result.debugMessage}")
+            refresh("Não foi possível iniciar a compra: ${result.debugMessage}")
         }
     }
 
     fun restorePurchases() {
-        entitlement.refreshLocalState()
-        update("Conferindo sua assinatura com a Google Play...", loading = true)
+        refresh("Verificando compras na Google Play...", loading = true)
         if (!client.isReady) {
-            // A conexão iniciada no construtor fará esta consulta ao finalizar.
-            // Não iniciar outra conexão simultaneamente durante onResume.
-            update("Conectando ao Google Play...", loading = true)
+            // A conexão inicial faz a consulta, sem startConnection concorrente.
             return
         }
+        checkOwned(BillingClient.ProductType.INAPP)
+        checkOwned(BillingClient.ProductType.SUBS)
+    }
+
+    private fun checkOwned(type: String) {
         client.queryPurchasesAsync(
-            QueryPurchasesParams.newBuilder()
-                .setProductType(BillingClient.ProductType.SUBS)
-                .build()
+            QueryPurchasesParams.newBuilder().setProductType(type).build()
         ) { result, purchases ->
             if (result.responseCode != BillingClient.BillingResponseCode.OK) {
-                update("Não foi possível consultar as compras. Verifique a internet.", loading = false)
+                refresh("Sem acesso à Google Play. Direitos já verificados mantidos por seu período válido.",
+                    loading = false)
                 return@queryPurchasesAsync
             }
-            val relevant = purchases.filter { it.products.contains(PlanPolicy.PRODUCT_ID) }
-            val purchased = relevant.filter { it.purchaseState == Purchase.PurchaseState.PURCHASED }
-            if (purchased.isEmpty()) {
-                // Uma resposta bem-sucedida sem compra ativa revoga o cache local.
-                entitlement.revoke()
-                update(
-                    if (relevant.any { it.purchaseState == Purchase.PurchaseState.PENDING })
-                        "Pagamento pendente. O Pro será liberado após confirmação."
-                    else "Plano Gratuito ativo.",
-                    loading = false,
-                    pending = relevant.any { it.purchaseState == Purchase.PurchaseState.PENDING }
-                )
-            } else {
-                scope.launch { verifyPurchases(purchased) }
-            }
+            val product = if (type == BillingClient.ProductType.INAPP)
+                PlanPolicy.OFFLINE_PRODUCT_ID else PlanPolicy.PRODUCT_ID
+            val relevant = purchases.filter { product in it.products }
+            val confirmed = relevant.filter { it.purchaseState == Purchase.PurchaseState.PURCHASED }
+            if (confirmed.isEmpty()) {
+                if (type == BillingClient.ProductType.INAPP) entitlement.revokeOffline()
+                else {
+                    entitlement.revokeOnline()
+                    confirmedOnlinePurchaseToken = null
+                }
+                refresh(if (relevant.any { it.purchaseState == Purchase.PurchaseState.PENDING })
+                    "Compra pendente de aprovação pela Google Play."
+                else "Consulta de compras concluída.", loading = false,
+                    pending = relevant.any { it.purchaseState == Purchase.PurchaseState.PENDING })
+            } else scope.launch { verifyPurchases(confirmed) }
         }
     }
 
@@ -183,54 +215,60 @@ class PlayBillingManager(
                 else scope.launch { verifyPurchases(purchases) }
             }
             BillingClient.BillingResponseCode.USER_CANCELED ->
-                update("Compra cancelada. O plano Gratuito continua disponível.", loading = false)
-            else -> update("Compra não concluída: ${result.debugMessage}", loading = false)
+                refresh("Compra não realizada. Seu plano atual continua ativo.", loading = false)
+            else -> refresh("Compra não concluída: ${result.debugMessage}", loading = false)
         }
     }
 
     private suspend fun verifyPurchases(purchases: List<Purchase>) {
-        val completed = purchases.filter {
-            it.products.contains(PlanPolicy.PRODUCT_ID) &&
-                it.purchaseState == Purchase.PurchaseState.PURCHASED
-        }
-        val pending = purchases.any { it.purchaseState == Purchase.PurchaseState.PENDING }
-        if (completed.isEmpty()) {
-            update("Pagamento pendente. Aguarde a confirmação da Google Play.",
-                loading = false, pending = pending)
-            return
-        }
-        if (!verifyUrl.startsWith("https://")) {
-            update("A verificação segura ainda não foi configurada.", loading = false)
-            return
-        }
-        update("Validando assinatura com a Google Play...", loading = true)
-        var verifiedUntil = 0L
+        var anyValidated = false
+        var pending = false
         var error: String? = null
-        for (purchase in completed) {
+        for (purchase in purchases) {
+            if (purchase.purchaseState == Purchase.PurchaseState.PENDING) {
+                pending = true
+                continue
+            }
+            if (purchase.purchaseState != Purchase.PurchaseState.PURCHASED) continue
+            val kind = when {
+                PlanPolicy.PRODUCT_ID in purchase.products -> "subscription"
+                PlanPolicy.OFFLINE_PRODUCT_ID in purchase.products -> "one_time"
+                else -> continue
+            }
+            if (!verifyUrl.startsWith("https://")) {
+                error = "O verificador de pagamentos ainda não foi configurado."
+                continue
+            }
             try {
-                val expiry = withContext(Dispatchers.IO) { verifyWithBackend(purchase.purchaseToken) }
-                if (expiry > System.currentTimeMillis()) {
-                    verifiedUntil = maxOf(verifiedUntil, expiry)
-                    // O servidor reconhece (acknowledge) a compra após validá-la
-                    // pela Google Play Developer API. Não confirmar antecipadamente no APK.
+                val response = withContext(Dispatchers.IO) {
+                    verifyWithBackend(purchase.purchaseToken, kind)
                 }
-            } catch (exception: Exception) {
-                error = exception.localizedMessage
+                if (response.optBoolean("active", false)) {
+                    if (kind == "one_time") {
+                        entitlement.grantOfflineVerified()
+                        anyValidated = true
+                    } else {
+                        val expiry = response.optLong("expiresAtMillis", 0)
+                        if (expiry > System.currentTimeMillis()) {
+                            entitlement.grantOnlineVerified(expiry)
+                            confirmedOnlinePurchaseToken = purchase.purchaseToken
+                            anyValidated = true
+                        }
+                    }
+                } else error = "Compra não ativa no Google Play."
+            } catch (e: Exception) {
+                error = e.localizedMessage ?: "Falha de verificação."
             }
         }
-        if (verifiedUntil > System.currentTimeMillis()) {
-            entitlement.grantVerified(verifiedUntil)
-            update("Orçamento Express Pro ativo. Obrigado!", loading = false, pending = false)
-        } else {
-            // Não concede Pro sem validação; mantém cache verificado anterior apenas
-            // enquanto ainda estiver dentro da janela offline documentada.
-            entitlement.refreshLocalState()
-            update(error ?: "Assinatura não confirmada pela Google Play.", loading = false,
-                pending = pending)
-        }
+        refresh(
+            if (anyValidated) "Compra validada pela Google Play. Obrigado!"
+            else if (pending) "Pagamento pendente. Aguarde a confirmação."
+            else error ?: "Não foi encontrada compra válida.",
+            loading = false, pending = pending
+        )
     }
 
-    private fun verifyWithBackend(purchaseToken: String): Long {
+    private fun verifyWithBackend(token: String, kind: String): JSONObject {
         val connection = (URL(verifyUrl).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 10_000
@@ -240,22 +278,15 @@ class PlayBillingManager(
             setRequestProperty("Accept", "application/json")
         }
         return try {
-            val body = JSONObject().put("purchaseToken", purchaseToken).toString()
-            connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+            val request = JSONObject()
+                .put("purchaseToken", token)
+                .put("type", kind)
+                .toString()
+            connection.outputStream.use { it.write(request.toByteArray(Charsets.UTF_8)) }
             val status = connection.responseCode
-            val stream = if (status in 200..299) connection.inputStream else connection.errorStream
-            val response = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
-            if (status !in 200..299) {
-                throw IllegalStateException("Servidor de validação indisponível (HTTP $status).")
-            }
-            val json = JSONObject(response)
-            if (!json.optBoolean("active", false)) {
-                throw IllegalStateException("Assinatura não ativa no Google Play.")
-            }
-            json.getLong("expiresAtMillis")
-        } finally {
-            connection.disconnect()
-        }
+            if (status !in 200..299) error("Verificação indisponível (HTTP $status)")
+            JSONObject(connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() })
+        } finally { connection.disconnect() }
     }
 
     fun close() {

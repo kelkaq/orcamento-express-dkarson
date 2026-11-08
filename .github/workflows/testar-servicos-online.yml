@@ -1,0 +1,31 @@
+name: Testar serviços online DKARSON
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: online-ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  testar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Instalar e testar verificação Google Play
+        run: |
+          cd server/play-billing
+          npm install --no-audit --no-fund
+          node --check server.mjs
+          npm test
+      - name: Instalar e testar serviço online
+        run: |
+          cd server/online
+          npm install --no-audit --no-fund
+          node --check server.mjs
+          node --check web/app.js
+          npm test

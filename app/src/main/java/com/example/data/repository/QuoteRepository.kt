@@ -12,6 +12,8 @@ import com.example.data.entity.PaymentEntity
 import com.example.data.entity.ServiceOrderEntity
 import com.example.data.entity.QuoteTemplateEntity
 import com.example.data.entity.DraftQuoteEntity
+import com.example.data.entity.QuoteCostEntity
+import com.example.data.entity.AgendaEventEntity
 import com.example.data.entity.QuoteEntity
 import com.example.data.entity.QuoteItemEntity
 import com.example.data.entity.QuoteSequenceEntity
@@ -33,7 +35,10 @@ data class DashboardMetrics(
     val totalReceivable: Double = 0.0,
     val pendingValue: Double = 0.0,
     val completedCount: Int = 0,
-    val overdueCount: Int = 0
+    val overdueCount: Int = 0,
+    val estimatedCosts: Double = 0.0,
+    val estimatedProfit: Double = 0.0,
+    val pricedQuotesCount: Int = 0
 )
 
 class QuoteRepository(
@@ -58,6 +63,8 @@ class QuoteRepository(
     private val orderDao = db.serviceOrderDao()
     private val templateDao = db.quoteTemplateDao()
     private val draftDao = db.draftQuoteDao()
+    private val costDao = db.quoteCostDao()
+    private val agendaDao = db.agendaEventDao()
     private val companyProfileDao = db.companyProfileDao()
     private val sequenceDao = db.quoteSequenceDao()
 
@@ -68,7 +75,9 @@ class QuoteRepository(
      * Aprovação histórica sem timestamp não é atribuída artificialmente ao período.
      */
     fun dashboardMetricsByPeriod(period: String): Flow<DashboardMetrics> =
-        combine(quoteDao.getAllQuotesWithItems(), paymentDao.observeAll()) { quotesWithItems, payments ->
+        combine(
+            quoteDao.getAllQuotesWithItems(), paymentDao.observeAll(), costDao.observeAll()
+        ) { quotesWithItems, payments, costs ->
             val calendar = Calendar.getInstance()
             val now = System.currentTimeMillis()
             val start: Long
@@ -124,6 +133,11 @@ class QuoteRepository(
             }
             val receivedCents = payments.filter { it.paidAt >= start && it.paidAt < end }
                 .sumOf { it.amountCents }
+            val costsById = costs.associateBy { it.quoteId }
+            val pricedQuotes = approved.filter { costsById[it.id] != null }
+            val costCents = pricedQuotes.sumOf { costsById[it.id]!!.totalCents }
+            val profitCents = pricedQuotes.sumOf { cents(it.total) -
+                costsById[it.id]!!.totalCents }
             DashboardMetrics(
                 totalQuotes = issued.size,
                 pendingCount = pending.size,
@@ -133,7 +147,10 @@ class QuoteRepository(
                 totalReceivable = remainingCents / 100.0,
                 pendingValue = pending.sumOf { cents(it.total) } / 100.0,
                 completedCount = issued.count { it.status == "COMPLETED" },
-                overdueCount = pending.count { it.validUntil < now }
+                overdueCount = pending.count { it.validUntil < now },
+                estimatedCosts = costCents / 100.0,
+                estimatedProfit = profitCents / 100.0,
+                pricedQuotesCount = pricedQuotes.size
             )
         }
 
@@ -153,7 +170,11 @@ class QuoteRepository(
 
     suspend fun getQuoteWithItems(id: Long): QuoteWithItems? = quoteDao.getQuoteWithItems(id)
 
-    suspend fun saveQuoteWithItems(quote: QuoteEntity, items: List<QuoteItemEntity>): Long = db.withTransaction {
+    suspend fun saveQuoteWithItems(
+        quote: QuoteEntity,
+        items: List<QuoteItemEntity>,
+        costEstimate: QuoteCostEntity? = null
+    ): Long = db.withTransaction {
         // Limite somente para NOVOS orçamentos. Visualizar/editar documentos existentes é sempre permitido.
         if (quote.id <= 0L && !hasVerifiedPro()) {
             val (start, end) = PlanPolicy.currentMonthBounds()
@@ -164,7 +185,19 @@ class QuoteRepository(
         require(quote.id <= 0 || paymentDao.countForQuote(quote.id) == 0) {
             "Este orçamento possui recebimentos. Não é permitido alterar os valores após o pagamento."
         }
-        quoteDao.saveQuoteWithItems(quote, items)
+        // Preserva a criação original ao editar: não altera histórico nem reinicia
+        // indevidamente a cota mensal de quem está no plano Gratuito.
+        val savedQuote = if (quote.id > 0L) {
+            val original = quoteDao.getQuoteWithItems(quote.id)?.quote
+                ?: error("Orçamento não encontrado.")
+            quote.copy(createdAt = original.createdAt)
+        } else quote.copy(createdAt = System.currentTimeMillis())
+        val savedId = quoteDao.saveQuoteWithItems(savedQuote, items)
+        if (costEstimate != null) {
+            require(costEstimate.totalCents >= 0L) { "O custo não pode ser negativo." }
+            costDao.upsert(costEstimate.copy(quoteId = savedId, updatedAt = System.currentTimeMillis()))
+        }
+        savedId
     }
 
     suspend fun updateQuoteStatus(quoteId: Long, newStatus: String) = db.withTransaction {
@@ -185,6 +218,57 @@ class QuoteRepository(
     fun observePayments(quoteId: Long): Flow<List<PaymentEntity>> = paymentDao.observeByQuote(quoteId)
 
     val allPayments: Flow<List<PaymentEntity>> = paymentDao.observeAll()
+
+    val agendaEvents: Flow<List<AgendaEventEntity>> = agendaDao.observeAll()
+    fun observeQuoteCosts(quoteId: Long): Flow<QuoteCostEntity?> = costDao.observeByQuote(quoteId)
+    suspend fun getQuoteCosts(quoteId: Long): QuoteCostEntity? = costDao.getByQuote(quoteId)
+
+    suspend fun saveQuoteCosts(
+        quoteId: Long,
+        materialsCents: Long,
+        laborCents: Long,
+        travelCents: Long,
+        otherCents: Long
+    ) = db.withTransaction {
+        require(listOf(materialsCents, laborCents, travelCents, otherCents).all { it >= 0 }) {
+            "Os custos não podem ser negativos."
+        }
+        require(quoteDao.getQuoteWithItems(quoteId) != null) { "Orçamento não encontrado." }
+        costDao.upsert(QuoteCostEntity(quoteId, materialsCents, laborCents, travelCents, otherCents))
+    }
+
+    suspend fun saveAgendaEvent(event: AgendaEventEntity): Long = db.withTransaction {
+        require(event.title.isNotBlank()) { "Informe o título do compromisso." }
+        require(event.scheduledAt > 0) { "Informe uma data válida." }
+        require(event.kind in setOf("FOLLOW_UP", "SERVICE")) { "Tipo de evento inválido." }
+        require(event.status in setOf("PENDING", "DONE", "CANCELED")) { "Situação inválida." }
+        if (event.quoteId != null) {
+            require(quoteDao.getQuoteWithItems(event.quoteId) != null) { "O orçamento foi excluído." }
+        }
+        val old = if (event.id > 0) agendaDao.getById(event.id) else null
+        agendaDao.upsert(event.copy(
+            title = event.title.trim().take(160),
+            notes = event.notes.trim().take(1200),
+            createdAt = old?.createdAt ?: System.currentTimeMillis(),
+            remindedAt = if (old?.remindAt == event.remindAt &&
+                old?.status == event.status) old.remindedAt else null,
+            updatedAt = System.currentTimeMillis()
+        ))
+    }
+    suspend fun deleteAgendaEvent(id: Long) = agendaDao.delete(id)
+    suspend fun getAgendaEvent(id: Long) = agendaDao.getById(id)
+    suspend fun getDueAgendaReminders(now: Long) = agendaDao.getDueReminders(now)
+    suspend fun markAgendaReminded(id: Long, now: Long) = agendaDao.markReminded(id, now)
+
+    /** Eventos da aprovação online só podem alterar proposta pendente, jamais uma paga. */
+    suspend fun applyOnlineDecision(quoteId: Long, decision: String) = db.withTransaction {
+        require(decision in setOf("APPROVED", "REJECTED"))
+        val current = quoteDao.getQuoteWithItems(quoteId)?.quote ?: error("Orçamento inexistente.")
+        require(current.status == "PENDING" && paymentDao.countForQuote(quoteId) == 0) {
+            "A situação já mudou; confira antes de atualizar."
+        }
+        quoteDao.updateStatus(quoteId, decision)
+    }
     val templates: Flow<List<QuoteTemplateEntity>> = templateDao.observeAll()
     fun observeServiceOrder(quoteId: Long): Flow<ServiceOrderEntity?> = orderDao.observeByQuote(quoteId)
     suspend fun getServiceOrder(quoteId: Long): ServiceOrderEntity? = orderDao.getByQuote(quoteId)
@@ -408,7 +492,9 @@ class QuoteRepository(
             payments = paymentDao.getAllRaw(),
             serviceOrders = orderDao.getAllRaw(),
             templates = templateDao.getAllRaw(),
-            drafts = draftDao.getAllRaw()
+            drafts = draftDao.getAllRaw(),
+            quoteCosts = costDao.getAllRaw(),
+            agendaEvents = agendaDao.getAllRaw()
         )
     }
 
@@ -422,13 +508,17 @@ class QuoteRepository(
         payments: List<PaymentEntity> = emptyList(),
         serviceOrders: List<ServiceOrderEntity> = emptyList(),
         templates: List<QuoteTemplateEntity> = emptyList(),
-        drafts: List<DraftQuoteEntity> = emptyList()
+        drafts: List<DraftQuoteEntity> = emptyList(),
+        quoteCosts: List<QuoteCostEntity> = emptyList(),
+        agendaEvents: List<AgendaEventEntity> = emptyList()
     ) {
         db.withTransaction {
             if (replaceExisting) {
                 // Modo SUBSTITUIR: limpa tabelas e restaura os IDs exatamente como vieram
                 orderDao.clearAll()
                 paymentDao.clearAll()
+                costDao.clearAll()
+                agendaDao.clearAll()
                 templateDao.clearAll()
                 draftDao.clearAll()
                 quoteDao.clearAllQuoteItems()
@@ -445,6 +535,8 @@ class QuoteRepository(
                 if (serviceOrders.isNotEmpty()) orderDao.insertRaw(serviceOrders)
                 if (templates.isNotEmpty()) templateDao.insertRaw(templates)
                 if (drafts.isNotEmpty()) draftDao.insertRaw(drafts)
+                if (quoteCosts.isNotEmpty()) costDao.insertRaw(quoteCosts)
+                if (agendaEvents.isNotEmpty()) agendaDao.insertRaw(agendaEvents)
             } else {
                 // Modo MESCLAR:
                 // 1. Perfil da Empresa: preserva dados locais se já existirem; apenas preenche se vazio
@@ -573,6 +665,16 @@ class QuoteRepository(
                 for (template in templates) {
                     templateDao.insert(template.copy(id = 0))
                 }
+                // Custos pertencem ao orçamento importado; nunca sobrescrevem custos locais.
+                for (cost in quoteCosts) {
+                    val newQuoteId = quoteIdMap[cost.quoteId]
+                        ?: error("Custo de orçamento não localizado na importação.")
+                    costDao.upsert(cost.copy(quoteId = newQuoteId))
+                }
+                for (event in agendaEvents) {
+                    val newQuoteId = event.quoteId?.let { oldId -> quoteIdMap[oldId] }
+                    agendaDao.upsert(event.copy(id = 0L, quoteId = newQuoteId))
+                }
                 // Rascunhos locais prevalecem na mesclagem; não substituir silenciosamente.
                 for (draft in drafts) {
                     if (draftDao.get(draft.draftKey) == null) draftDao.upsert(draft)
@@ -606,5 +708,7 @@ data class DatabaseBackupSnapshot(
     val payments: List<PaymentEntity> = emptyList(),
     val serviceOrders: List<ServiceOrderEntity> = emptyList(),
     val templates: List<QuoteTemplateEntity> = emptyList(),
-    val drafts: List<DraftQuoteEntity> = emptyList()
+    val drafts: List<DraftQuoteEntity> = emptyList(),
+    val quoteCosts: List<QuoteCostEntity> = emptyList(),
+    val agendaEvents: List<AgendaEventEntity> = emptyList()
 )
