@@ -35,7 +35,8 @@ data class BillingDisplayState(
     val offlinePrice: String? = null,
     val onlinePrice: String? = null,
     val message: String = "Consultando a Google Play...",
-    val purchasePending: Boolean = false
+    val purchasePending: Boolean = false,
+    val demoEnabled: Boolean = false
 )
 
 /**
@@ -53,7 +54,8 @@ class PlayBillingManager(
         BillingDisplayState(
             tier = entitlement.tierNow(),
             isPro = entitlement.isProNow(),
-            isOnline = entitlement.isOnlineNow()
+            isOnline = entitlement.isOnlineNow(),
+            demoEnabled = entitlement.isDemoEnabled()
         )
     )
     val state: StateFlow<BillingDisplayState> = _state
@@ -86,6 +88,7 @@ class PlayBillingManager(
             tier = entitlement.tierNow(),
             isPro = entitlement.isProNow(),
             isOnline = entitlement.isOnlineNow(),
+            demoEnabled = entitlement.isDemoEnabled(),
             isLoading = loading ?: old.isLoading,
             canBuyOffline = offlineDetails != null && offlineOffer != null &&
                 verifyUrl.startsWith("https://") && !entitlement.hasOfflinePurchase(),
@@ -94,6 +97,12 @@ class PlayBillingManager(
             message = message ?: old.message,
             purchasePending = pending ?: old.purchasePending
         )
+    }
+
+    fun setDemoEnabled(enabled: Boolean) {
+        entitlement.setDemoEnabled(enabled)
+        refresh(if (enabled) "Recursos Pro Offline liberados apenas para teste." else
+            "Modo de teste desativado.")
     }
 
     private fun connect() {

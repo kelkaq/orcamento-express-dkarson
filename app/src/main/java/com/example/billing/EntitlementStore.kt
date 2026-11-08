@@ -1,6 +1,7 @@
 package com.example.billing
 
 import android.content.Context
+import com.example.BuildConfig
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -29,13 +30,25 @@ class EntitlementStore(context: Context) {
             age >= -300_000L && age <= 72L * 60L * 60L * 1_000L
     }
 
+    /** Modo de homologação disponível somente no APK debug, sem compra fictícia em produção. */
     @Synchronized
-    fun isProNow(): Boolean = hasOfflinePurchase() || isOnlineNow()
+    fun isDemoEnabled(): Boolean =
+        BuildConfig.DEBUG && prefs.getBoolean("debug_demo_offline", false)
+
+    @Synchronized
+    fun setDemoEnabled(enabled: Boolean) {
+        if (!BuildConfig.DEBUG) return
+        prefs.edit().putBoolean("debug_demo_offline", enabled).apply()
+        refresh()
+    }
+
+    @Synchronized
+    fun isProNow(): Boolean = isDemoEnabled() || hasOfflinePurchase() || isOnlineNow()
 
     @Synchronized
     fun tierNow(): PlanTier = when {
         isOnlineNow() -> PlanTier.ONLINE
-        hasOfflinePurchase() -> PlanTier.OFFLINE
+        hasOfflinePurchase() || isDemoEnabled() -> PlanTier.OFFLINE
         else -> PlanTier.FREE
     }
 

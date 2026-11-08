@@ -2,6 +2,7 @@ package com.example.ui.navigation
 
 sealed class Screen(val route: String) {
     object Pro : Screen("plano_pro")
+    object About : Screen("sobre_app")
     object Cloud : Screen("central_online")
     object Agenda : Screen("agenda?quoteId={quoteId}") {
         fun createRoute(quoteId: Long? = null): String =

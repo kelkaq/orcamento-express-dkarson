@@ -89,6 +89,8 @@ fun CompanyScreen(
     viewModel: CompanyViewModel,
     isPro: Boolean = false,
     onOpenPlan: () -> Unit = {},
+    onOpenAbout: () -> Unit = {},
+    onOpenAccount: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -533,6 +535,28 @@ fun CompanyScreen(
                         Column {
                             Text("Orçamento Express", fontWeight = FontWeight.Bold, color = NavyPrimary)
                             Text("Desenvolvido por DKARSON", fontSize = 12.sp, color = SlateMuted)
+                        }
+                    }
+                }
+            }
+
+            // A conta não é obrigatória para o uso local; o Online requer login.
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 7.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Conta e informações", fontWeight = FontWeight.Bold, color = NavyPrimary)
+                        Text("Seu histórico permanece neste aparelho até que você escolha usar a nuvem.",
+                            color = SlateMuted, fontSize = 12.sp)
+                        OutlinedButton(onClick = onOpenAccount,
+                            modifier = Modifier.fillMaxWidth().testTag("company_account_button")) {
+                            Text("Minha conta e sincronização")
+                        }
+                        OutlinedButton(onClick = onOpenAbout,
+                            modifier = Modifier.fillMaxWidth().testTag("company_about_button")) {
+                            Text("Sobre o aplicativo • versão e suporte")
                         }
                     }
                 }

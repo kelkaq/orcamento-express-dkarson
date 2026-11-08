@@ -16,8 +16,8 @@ android {
     applicationId = "com.dkarson.orcamentoexpress"
     minSdk = 24
     targetSdk = 36
-    versionCode = 3
-    versionName = "1.2"
+    versionCode = 4
+    versionName = "1.3"
 
     // Endpoint público HTTPS do verificador SEGURO, nunca credenciais Google no APK.
     val verifyEndpoint = System.getenv("BILLING_VERIFY_URL").orEmpty().trim()
@@ -27,6 +27,11 @@ android {
     val cloudEndpoint = System.getenv("CLOUD_API_URL").orEmpty().trim()
     buildConfigField("String", "CLOUD_API_URL",
       "\"" + cloudEndpoint.replace("\\", "\\\\").replace("\"", "\\\"") + "\"")
+
+    // ID publico do cliente OAuth Web (não é segredo); só configurado pelo proprietário.
+    val googleWebClientId = System.getenv("GOOGLE_WEB_CLIENT_ID").orEmpty().trim()
+    buildConfigField("String", "GOOGLE_WEB_CLIENT_ID",
+      "\"" + googleWebClientId.replace("\\", "\\\\").replace("\"", "\\\"") + "\"")
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -100,6 +105,9 @@ dependencies {
   // implementation(libs.accompanist.permissions)
   // Google Play Billing Library 9 (obrigatória para assinaturas na Google Play).
   implementation("com.android.billingclient:billing:9.1.0")
+  implementation("androidx.credentials:credentials:1.6.0")
+  implementation("androidx.credentials:credentials-play-services-auth:1.6.0")
+  implementation("com.google.android.libraries.identity.googleid:googleid:1.2.1")
   implementation("androidx.work:work-runtime-ktx:2.12.0")
   implementation(libs.androidx.activity.compose)
   // implementation(libs.androidx.camera.camera2)

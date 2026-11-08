@@ -28,6 +28,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.BuildConfig
 import com.example.billing.PlanPolicy
 import com.example.billing.PlanTier
 import com.example.billing.PlayBillingManager
@@ -63,6 +64,20 @@ fun ProPlanScreen(
                 Text("Você escolhe como usar", fontWeight = FontWeight.Bold)
                 Text("Não é necessário pagar mensalidade para emitir orçamentos. " +
                     "Comprar a licença offline é uma opção; a assinatura é somente para serviços online.")
+            }
+            if (BuildConfig.DEBUG) item {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                        Text("HOMOLOGAÇÃO — NÃO É UMA COMPRA", fontWeight = FontWeight.Bold, color = NavyPrimary)
+                        Text("Neste aplicativo de teste, você pode experimentar todas as ferramentas do Pro Offline sem pagar. Não libera nuvem nem assinatura real.")
+                        Button(
+                            onClick = { manager.setDemoEnabled(!state.demoEnabled) },
+                            modifier = Modifier.fillMaxWidth().testTag("debug_demo_toggle")
+                        ) {
+                            Text(if (state.demoEnabled) "Desativar Pro de teste" else "Ativar Pro de teste")
+                        }
+                    }
+                }
             }
             item {
                 Card(modifier = Modifier.fillMaxWidth()) {

@@ -33,6 +33,7 @@ import com.example.ui.screens.quote_detail.QuoteDetailScreen
 import com.example.ui.screens.quote_edit.QuoteEditorScreen
 import com.example.ui.screens.quotes.QuotesScreen
 import com.example.ui.screens.pro.ProPlanScreen
+import com.example.ui.screens.about.AboutScreen
 import com.example.ui.screens.agenda.AgendaScreen
 import com.example.ui.screens.cloud.CloudScreen
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -195,13 +196,26 @@ fun OrcamentoExpressApp(
             // Company & Settings Tab
             composable(Screen.Company.route) {
                 CompanyScreen(viewModel = companyViewModel, isPro = billingState.isPro,
-                    onOpenPlan = goToPro)
+                    onOpenPlan = goToPro,
+                    onOpenAccount = { navController.navigate(Screen.Cloud.route) },
+                    onOpenAbout = { navController.navigate(Screen.About.route) })
             }
 
             composable(Screen.Pro.route) {
                 ProPlanScreen(manager = billingManager,
                     onBack = { navController.popBackStack() },
                     onOpenOnline = { navController.navigate(Screen.Cloud.route) })
+            }
+
+            composable(Screen.About.route) {
+                AboutScreen(
+                    tier = billingState.tier,
+                    isDemo = billingState.demoEnabled,
+                    onlineConfigured = cloudClient.configured,
+                    onBack = { navController.popBackStack() },
+                    onOpenAccount = { navController.navigate(Screen.Cloud.route) },
+                    onOpenPlan = goToPro
+                )
             }
 
             composable(Screen.Cloud.route) {
