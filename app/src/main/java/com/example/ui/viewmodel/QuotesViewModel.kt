@@ -59,14 +59,23 @@ class QuotesViewModel(private val repository: QuoteRepository) : ViewModel() {
             initialValue = emptyList()
         )
 
-    @OptIn(ExperimentalCoroutinesApi::class)
+    /**
+     * A lista filtrada deriva do mesmo histórico salvo, sem reabrir consultas Room
+     * ao trocar rapidamente entre filtros. O histórico em si nunca é filtrado.
+     */
     val quotesList: StateFlow<List<QuoteWithItems>> = combine(
+        savedQuoteHistory,
         _selectedStatus,
         _searchQuery
-    ) { status, query ->
-        Pair(status, query)
-    }.flatMapLatest { (status, query) ->
-        repository.getFilteredQuotes(status, query)
+    ) { saved, status, rawQuery ->
+        val query = rawQuery.trim()
+        saved.filter { entry ->
+            val q = entry.quote
+            (status == "ALL" || q.status == status) &&
+                (query.isBlank() ||
+                    q.clientName.contains(query, ignoreCase = true) ||
+                    q.quoteNumber.contains(query, ignoreCase = true))
+        }
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
