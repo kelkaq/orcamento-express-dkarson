@@ -150,6 +150,8 @@ fun CloudScreen(
                                 ) { Text("Continuar com Google") }
                             }
                             Text("Ou entre com código no e-mail, sem criar senha:")
+                            Text("Por segurança, os dados locais pertencem a um único espaço de trabalho neste aparelho. " +
+                                "Para trocar de usuário, salve um backup e use uma instalação limpa.")
                             OutlinedTextField(
                                 value = email, onValueChange = { email = it },
                                 label = { Text("E-mail") },
@@ -194,9 +196,12 @@ fun CloudScreen(
                     }
                     OutlinedButton(
                         onClick = { work {
-                            val message = client.signOut()
+                            val result = runCatching { client.signOut() }
                             logged = false; sent = false; code = ""
-                            message
+                            result.getOrElse {
+                                "Conta desconectada deste aparelho. O servidor não confirmou o encerramento; " +
+                                    "a sessão remota expira em até 30 dias."
+                            }
                         } },
                         enabled = !busy,
                         modifier = Modifier.fillMaxWidth()

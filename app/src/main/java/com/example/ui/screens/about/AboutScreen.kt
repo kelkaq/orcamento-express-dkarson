@@ -74,6 +74,7 @@ fun AboutScreen(
                         Text("Nuvem: " + if (onlineConfigured) "servidor configurado; exige acesso e assinatura válida" else
                             "não configurada nesta compilação")
                         Text("Entrar com Google ou e-mail é opcional para uso local. A recuperação em outro aparelho requer cópia de segurança.")
+                        Text("Cada instalação tem um único espaço de trabalho local. Sair da conta não oculta nem apaga os dados deste celular.")
                         OutlinedButton(
                             onClick = onOpenAccount, modifier = Modifier.fillMaxWidth()
                         ) { Text("Minha conta e cópias de segurança") }

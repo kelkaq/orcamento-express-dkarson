@@ -43,3 +43,4 @@ Documentação oficial:
 - https://docs.cloud.google.com/pubsub/docs/authenticate-push-subscriptions
 - https://supabase.com/docs/guides/database/connecting-to-postgres
 - https://developer.android.com/identity/sign-in/credential-manager-siwg-implementation
+\n## Segurança ao trocar de conta\n\nO Room é um espaço de trabalho local único por instalação, não um banco multiusuário. Após vincular a primeira conta, o app impede login em outra conta no mesmo espaço para evitar que dados de um profissional sejam sincronizados com a nuvem de outro. Para transferir ou mudar o proprietário da instalação, exportar e validar backup, apagar os dados do aplicativo e reiniciar em uma instalação limpa. O logout não remove os dados armazenados no aparelho. A separação simultânea de vários usuários no mesmo dispositivo exige projeto específico de isolamento de base local e **não é oferecida nesta versão**.\n

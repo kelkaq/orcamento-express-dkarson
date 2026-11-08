@@ -51,13 +51,29 @@ class CloudClient(private val context: Context) {
 
     fun email(): String = prefs.getString("email", "").orEmpty()
 
+    /** Banco local é um único espaço por instalação: não misturar dados de contas. */
+    private fun requireCurrentWorkspace(email: String) {
+        val previous = prefs.getString("workspace_email", prefs.getString("email", null))
+        if (!previous.isNullOrBlank() && !previous.equals(email.trim(), ignoreCase = true)) {
+            error("Este aparelho já tem um espaço de trabalho de outra conta. " +
+                "Exporte seus dados e utilize outra instalação limpa antes de trocar de usuário.")
+        }
+    }
+
+    private fun rememberWorkspace(email: String) {
+        prefs.edit().putString("workspace_email", email.trim().lowercase()).apply()
+    }
+
     /** ID token verificado pelo servidor Google; sem autenticação local simulada. */
     suspend fun googleLogin(idToken: String): String = withContext(Dispatchers.IO) {
         check(googleLoginAvailable) { "Configure o login Google no servidor." }
         val result = post("/v1/cloud/google-sign-in",
             JSONObject().put("idToken", idToken), authenticated = false)
+        val verifiedEmail = result.getString("email")
+        requireCurrentWorkspace(verifiedEmail)
         storeToken(result.getString("token"))
-        prefs.edit().putString("email", result.getString("email")).remove("revision").apply()
+        rememberWorkspace(verifiedEmail)
+        prefs.edit().putString("email", verifiedEmail).remove("revision").apply()
         "Conta Google conectada com segurança."
     }
 
@@ -83,6 +99,7 @@ class CloudClient(private val context: Context) {
 
     suspend fun requestCode(email: String): String = withContext(Dispatchers.IO) {
         require(email.contains('@') && email.length <= 254) { "E-mail inválido." }
+        requireCurrentWorkspace(email)
         post("/v1/cloud/request-code", JSONObject().put("email", email.trim().lowercase()),
             authenticated = false)
         "Enviamos um código de acesso para o e-mail informado."
@@ -90,6 +107,7 @@ class CloudClient(private val context: Context) {
 
     suspend fun confirmCode(email: String, code: String): String = withContext(Dispatchers.IO) {
         require(code.matches(Regex("[0-9]{6}"))) { "Informe o código com seis números." }
+        requireCurrentWorkspace(email)
         val result = post(
             "/v1/cloud/verify-code",
             JSONObject().put("email", email.trim().lowercase()).put("code", code),
@@ -97,6 +115,7 @@ class CloudClient(private val context: Context) {
         )
         val token = result.getString("token")
         storeToken(token)
+        rememberWorkspace(email)
         prefs.edit().putString("email", email.trim().lowercase())
             .remove("revision").apply()
         "Acesso à nuvem conectado."
