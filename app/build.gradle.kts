@@ -25,6 +25,15 @@ android {
   // A chave Release pertence exclusivamente ao proprietário do app.
   // Nunca distribua o .jks nem suas senhas em ZIPs de código ou repositórios.
   signingConfigs {
+    // Chave EXCLUSIVAMENTE para o pacote de testes.
+    // Nunca use essa chave para publicar na Play Store ou assinar a versão release.
+    create("dkarsonDebug") {
+      storeFile = file("${rootDir}/app/dkarson-test-only.p12")
+      storeType = "PKCS12"
+      storePassword = "android"
+      keyAlias = "dkarson-debug"
+      keyPassword = "android"
+    }
     create("release") {
       val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
       storeFile = file(keystorePath)
@@ -42,14 +51,11 @@ android {
       signingConfig = signingConfigs.getByName("release")
     }
     debug {
-      // Instala paralelamente ao aplicativo existente sem alterar os dados de produção.
-      // O APK de teste fica em com.dkarson.orcamentoexpress.teste.
-      // A ramificação experimental usa um aplicativo de teste separado.
-      // Assim o usuário conserva o Orçamento Express (Teste) anterior e seus dados.
-      val isReceiptsPreview = System.getenv("GITHUB_REF_NAME") == "feat/recibos-e-calculadora"
-      applicationIdSuffix = if (isReceiptsPreview) ".teste.recibos" else ".teste"
-      versionNameSuffix = if (isReceiptsPreview) "-teste-recibos" else "-teste"
-      signingConfig = signingConfigs.getByName("debug")
+      // Nome e assinatura ESTÁVEIS para futuras atualizações do ambiente de testes.
+      // Identificador diferente dos pacotes antigos: permite recuperar dados via backup.
+      applicationIdSuffix = ".teste.unificado"
+      versionNameSuffix = "-teste"
+      signingConfig = signingConfigs.getByName("dkarsonDebug")
     }
   }
   compileOptions {

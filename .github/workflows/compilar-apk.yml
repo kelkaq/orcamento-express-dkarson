@@ -7,6 +7,11 @@ on:
 permissions:
   contents: read
 
+# Evita compilar commits antigos repetidamente: só a revisão mais recente permanece ativa.
+concurrency:
+  group: android-ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   compilar:
     name: Compilar e testar Android
@@ -62,7 +67,7 @@ jobs:
           done
 
       - name: Disponibilizar APK para baixar
-        if: always()
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: ORCAMENTO_EXPRESS_DKARSON_TESTE_APK
