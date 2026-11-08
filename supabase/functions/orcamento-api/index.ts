@@ -10,12 +10,13 @@ import {normalizeEmail,token,sha256,subscriptionStatus,
   validateBackup,validateQuote,parseRtdn,esc} from './lib.mjs';
 import {seal,open} from './crypto.ts';
 import {verifyPurchase,productInfo} from './play.ts';
+import {webHtml,webJs,webCss} from './web.mjs';
 
 const host=Deno.env.get('SUPABASE_URL')||'';
 const secret=Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')||'';
 const anon=Deno.env.get('SUPABASE_ANON_KEY')||'';
 const publicBase=(Deno.env.get('PUBLIC_EDGE_BASE_URL')||'').replace(/\/$/,'');
-if(!host.startsWith('https://')||!secret||!anon)
+if(!host.startsWith('https://')||!secret||!anon||!publicBase.startsWith('https://'))
   throw new Error('Supabase URL e chaves de serviço não configuradas');
 const svc=createClient(host,secret,{auth:{persistSession:false,autoRefreshToken:false}});
 const auth=createClient(host,anon,{auth:{persistSession:false,autoRefreshToken:false}});
@@ -74,7 +75,8 @@ async function getUser(req:Request):Promise<any> {
   const result=await svc.from('oe_sessions').select('user_id,expires_at')
     .eq('token_hash',hashed).maybeSingle();
   const session=dataOrThrow(result.data,result.error);
-  if(!session||Date.parse(session.expires_at)<=Date.now())fail('Sessão expirada',401);
+  if(!session)throw new ApiError('Sessão expirada',401);
+  if(Date.parse(session.expires_at)<=Date.now())fail('Sessão expirada',401);
   const u=await svc.from('oe_users').select('id,email,auth_uid,google_sub')
     .eq('id',session.user_id).maybeSingle();
   const user=dataOrThrow(u.data,u.error);
@@ -167,8 +169,10 @@ async function cloud(req:Request,path:string):Promise<Response>{
     await limit('otp:verify:'+(await sha256(email)),10,300);
     const result=await auth.auth.verifyOtp({email,token:code,type:'email'});
     if(result.error || !result.data.user?.email_confirmed_at)
-      fail('Código inválido ou expirado',401);
-    const user=await ensureEmailUser(email,String(result.data.user.id));
+      throw new ApiError('Código inválido ou expirado',401);
+    const confirmedUser=result.data.user;
+    if(!confirmedUser)throw new ApiError('Código inválido ou expirado',401);
+    const user=await ensureEmailUser(email,String(confirmedUser.id));
     return json({token:await createSession(user),expiresInDays:30,email});
   }
   if(req.method==='POST' && path==='/v1/cloud/google-sign-in'){
@@ -403,6 +407,15 @@ async function playRoute(req:Request,path:string):Promise<Response>{
   }
   return json({error:'not_found'},404);
 }
+function browserAsset(source:string,mime:string,site=false):Response {
+  return new Response(source,{headers:{
+    'content-type':mime+'; charset=utf-8','cache-control':'no-store',
+    'x-content-type-options':'nosniff','referrer-policy':'no-referrer',
+    'content-security-policy':site
+      ? "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'"
+      : "default-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+  }});
+}
 function informationPage(title:string,content:string):Response {
   return html('<!doctype html><html lang="pt-BR"><meta charset="utf-8">'+
     '<meta name="viewport" content="width=device-width,initial-scale=1">'+
@@ -426,6 +439,9 @@ Deno.serve(async (req:Request):Promise<Response>=>{
     const i=full.indexOf(root);
     const route=i<0?full:full.slice(i+root.length)||'/';
     if(route==='/health' && req.method==='GET')return json({ok:true,provider:'supabase'});
+    if(route==='/app' && req.method==='GET')return browserAsset(webHtml,'text/html',true);
+    if(route==='/app.js' && req.method==='GET')return browserAsset(webJs,'text/javascript');
+    if(route==='/style.css' && req.method==='GET')return browserAsset(webCss,'text/css');
     if(route==='/privacy' && req.method==='GET')
       return informationPage('Política de privacidade — Orçamento Express',privacyText);
     if(route==='/account-deletion' && req.method==='GET')
