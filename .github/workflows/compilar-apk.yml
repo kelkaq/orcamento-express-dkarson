@@ -9,8 +9,9 @@ permissions:
 
 env:
   # URL pública (sem credenciais) do servidor de verificação seguro.
-  BILLING_VERIFY_URL: ${{ vars.BILLING_VERIFY_URL }}
-  CLOUD_API_URL: ${{ vars.CLOUD_API_URL }}
+  SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+  BILLING_VERIFY_URL: ${{ vars.BILLING_VERIFY_URL || (vars.SUPABASE_PROJECT_REF != '' && format('https://{0}.supabase.co/functions/v1/orcamento-api/v1/play/verify', vars.SUPABASE_PROJECT_REF) || '') }}
+  CLOUD_API_URL: ${{ vars.CLOUD_API_URL || (vars.SUPABASE_PROJECT_REF != '' && format('https://{0}.supabase.co/functions/v1/orcamento-api', vars.SUPABASE_PROJECT_REF) || '') }}
   GOOGLE_WEB_CLIENT_ID: ${{ vars.GOOGLE_WEB_CLIENT_ID }}
 
 # Evita compilar commits antigos repetidamente: só a revisão mais recente permanece ativa.
