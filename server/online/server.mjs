@@ -2,9 +2,9 @@ import {createServer} from 'node:http';
 import {createHash,randomInt} from 'node:crypto';
 import {Pool} from 'pg';
 import nodemailer from 'nodemailer';
-import {GoogleAuth} from 'google-auth-library';
+import {GoogleAuth,OAuth2Client} from 'google-auth-library';
 import {assertBackup,assertQuoteForApproval,createCrypto,esc,hashSecret,
-  normalizeEmail,otpHash,safeEqualHex,subscriptionStatus,token} from './lib.mjs';
+  normalizeEmail,otpHash,safeEqualHex,subscriptionStatus,token,googleIdentityClaims} from './lib.mjs';
 import {readFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import {dirname,join} from 'node:path';
@@ -19,6 +19,7 @@ const config={
   smtpHost:process.env.SMTP_HOST||'',
   smtpPort:Number(process.env.SMTP_PORT||587),
   mailFrom:process.env.MAIL_FROM||'',
+  googleClientId:process.env.GOOGLE_WEB_CLIENT_ID||'',
   dbUrl:process.env.DATABASE_URL||''
 };
 if(!config.publicUrl.startsWith('https://') || config.otpKey.length<32 ||
@@ -33,6 +34,7 @@ const mail=nodemailer.createTransport({
   auth:{user:process.env.SMTP_USER,pass:process.env.SMTP_PASSWORD}
 });
 const google=new GoogleAuth({scopes:['https://www.googleapis.com/auth/androidpublisher']});
+const googleIdentityClient=new OAuth2Client();
 const requestRates=new Map();
 const rateTimer=setInterval(()=>{
   for(const [key,val] of requestRates) if(Date.now()-val.at>120000)requestRates.delete(key);
@@ -42,10 +44,13 @@ async function sqlSchema() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE,
+      google_sub TEXT UNIQUE,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       play_token_cipher TEXT, play_token_hash TEXT UNIQUE,
       online_expires_at TIMESTAMPTZ, play_checked_at TIMESTAMPTZ
     );
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS google_sub TEXT;
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_users_google_sub ON users(google_sub);
     CREATE TABLE IF NOT EXISTS otp_codes (
       email TEXT PRIMARY KEY, code_hash TEXT NOT NULL,
       attempts INTEGER NOT NULL DEFAULT 0, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -149,7 +154,49 @@ async function requireOnline(user) {
   await pool.query(`UPDATE users SET online_expires_at=to_timestamp($1/1000.0),
     play_checked_at=NOW() WHERE id=$2`,[status.expiresAtMillis,user.id]);
 }
+async function verifiedGoogleIdentity(idToken) {
+  if(!config.googleClientId) throw Object.assign(new Error('Login Google indisponível no servidor'),
+    {status:503});
+  if(typeof idToken!=='string'||idToken.length<100||idToken.length>8192)
+    throw Object.assign(new Error('Credencial Google inválida'),{status:400});
+  const ticket=await googleIdentityClient.verifyIdToken({
+    idToken,audience:config.googleClientId
+  });
+  const payload=ticket.getPayload();
+  const identity=googleIdentityClaims(payload);
+  return identity;
+}
 async function handleCloud(req,res,path) {
+  if(req.method==='POST' && path==='/v1/cloud/google-sign-in') {
+    limit('google_login:'+req.socket.remoteAddress,12,60_000);
+    const body=await readBody(req,9500);
+    const identity=await verifiedGoogleIdentity(body.idToken);
+    const db=await pool.connect();
+    try {
+      await db.query('BEGIN');
+      let rows=await db.query('SELECT id,email FROM users WHERE google_sub=$1 FOR UPDATE',
+        [identity.subject]);
+      if(!rows.rowCount) {
+        const current=await db.query('SELECT id,google_sub FROM users WHERE email=$1 FOR UPDATE',
+          [identity.email]);
+        if(current.rowCount) {
+          await db.query('ROLLBACK');
+          return reply(res,409,{error:'link_required',
+            message:'Essa conta já existe. Entre com código por e-mail e vincule o Google.'});
+        }
+        const id=token();
+        await db.query('INSERT INTO users(id,email,google_sub) VALUES($1,$2,$3)',
+          [id,identity.email,identity.subject]);
+        rows=await db.query('SELECT id,email FROM users WHERE id=$1',[id]);
+      }
+      const session=token();
+      await db.query(`INSERT INTO sessions(token_hash,user_id,expires_at)
+        VALUES($1,$2,NOW()+INTERVAL '30 days')`,
+        [hashSecret(session),rows.rows[0].id]);
+      await db.query('COMMIT');
+      return reply(res,200,{token:session,email:rows.rows[0].email,expiresInDays:30});
+    } catch(e) {await db.query('ROLLBACK');throw e;} finally {db.release();}
+  }
   if(req.method==='POST' && path==='/v1/cloud/request-code') {
     const body=await readBody(req,1024);
     const email=normalizeEmail(body.email);
@@ -198,6 +245,30 @@ async function handleCloud(req,res,path) {
     } catch(e){await db.query('ROLLBACK');throw e;} finally{db.release();}
   }
   const user=await getSession(req);
+  if(req.method==='POST' && path==='/v1/cloud/link-google') {
+    limit('google_link:'+user.id,6,60_000);
+    const identity=await verifiedGoogleIdentity((await readBody(req,9500)).idToken);
+    if(identity.email!==user.email) return reply(res,409,{error:'email_mismatch',
+      message:'A conta Google deve ter o mesmo e-mail da conta atual.'});
+    const updated=await pool.query(`UPDATE users SET google_sub=$1
+      WHERE id=$2 AND (google_sub IS NULL OR google_sub=$1) RETURNING id`,
+      [identity.subject,user.id]);
+    if(!updated.rowCount)return reply(res,409,{error:'other_google_linked'});
+    return reply(res,200,{linked:true,email:user.email});
+  }
+  if(req.method==='DELETE' && path==='/v1/cloud/session') {
+    const provided=String(req.headers.authorization||'').substring(7).trim();
+    await pool.query('DELETE FROM sessions WHERE token_hash=$1 AND user_id=$2',
+      [hashSecret(provided),user.id]);
+    return reply(res,200,{loggedOut:true});
+  }
+  if(req.method==='DELETE' && path==='/v1/cloud/account') {
+    const body=await readBody(req,1000);
+    if(body.confirm!=='EXCLUIR MINHA CONTA')
+      return reply(res,400,{error:'confirmation_required'});
+    await pool.query('DELETE FROM users WHERE id=$1',[user.id]);
+    return reply(res,200,{deleted:true});
+  }
   if(req.method==='POST' && path==='/v1/cloud/link-subscription') {
     const body=await readBody(req,5000);
     const purchaseToken=String(body.purchaseToken||'');

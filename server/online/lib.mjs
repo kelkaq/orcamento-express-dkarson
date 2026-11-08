@@ -12,6 +12,14 @@ export function normalizeEmail(value) {
     throw new Error('E-mail inválido');
   return email;
 }
+/** O ID do Google (sub) é estável; email não é uma chave de identidade. */
+export function googleIdentityClaims(payload) {
+  if(!payload || !payload.email_verified || typeof payload.sub!=='string' ||
+      payload.sub.length<8 || payload.sub.length>255 || !payload.email)
+    throw Object.assign(new Error('Identidade Google não verificada'),{status:401});
+  return {subject:payload.sub,email:normalizeEmail(payload.email)};
+}
+
 export function subscriptionStatus(data,productId,now=Date.now()) {
   const items=(data.lineItems||[]).filter(x=>x.productId===productId);
   const expires=Math.max(0,...items.map(x=>Date.parse(x.expiryTime)||0));

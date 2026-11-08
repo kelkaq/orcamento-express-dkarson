@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {assertBackup,assertQuoteForApproval,createCrypto,
-  normalizeEmail,esc,subscriptionStatus,otpHash,safeEqualHex} from './lib.mjs';
+  normalizeEmail,esc,subscriptionStatus,otpHash,safeEqualHex,googleIdentityClaims} from './lib.mjs';
 
 test('invalid backups cannot overwrite a user history',()=>{
   assert.throws(()=>assertBackup('{"app":"Other","version":4}'));
@@ -36,4 +36,15 @@ test('HTML and Google status safety',()=>{
   const future=new Date(Date.now()+86400000).toISOString();
   assert.equal(subscriptionStatus({subscriptionState:'SUBSCRIPTION_STATE_ON_HOLD',
     lineItems:[{productId:'sub',expiryTime:future}]},'sub').active,false);
+});
+
+test('Google ID requires email verification, subject, and canonical email',()=>{
+  assert.deepEqual(googleIdentityClaims({email:' User@Gmail.COM ',
+    email_verified:true,sub:'12345678abcde'}),{
+    email:'user@gmail.com',subject:'12345678abcde'
+  });
+  assert.throws(()=>googleIdentityClaims({
+    email:'user@gmail.com',email_verified:false,sub:'12345678abcde'}));
+  assert.throws(()=>googleIdentityClaims({
+    email:'user@gmail.com',email_verified:true,sub:''}));
 });
