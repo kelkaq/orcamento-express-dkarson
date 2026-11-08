@@ -6,7 +6,7 @@
 
 **Pro**: assinatura de renovação mensal com orçamentos ilimitados; criação/edição de ordens de serviço, registro de recebimentos, novos recibos, modelos reutilizáveis e acesso aos detalhes financeiros. Documentos antigos não são apagados nem bloqueados se o Pro expirar.
 
-**Preço comercial pretendido**: **R$ 39,90 por mês no Brasil**. O app exibe o preço REAL retornado pela Google Play. Não codifique valores fictícios no app: quem define moeda, impostos e preço é o Play Console.
+**Preço comercial: EM ESTUDO, NÃO APROVADO.** Pesquisas de mercado mostraram ofertas concorrentes gratuitas e de R$ 19,90/mês; avaliar faixa inicial de R$ 14,90–19,90 e diferenciais antes de ativar vendas. O app exibe apenas o preço REAL retornado pela Google Play. Não fixar nem ativar R$ 39,90 sem aprovação do proprietário.
 
 **Limitação operacional**: não é possível ativar um produto real de assinatura, nem gerar AAB de produção assinado, apenas a partir do código de um repositório. O desenvolvedor precisa concluir a identidade e a conta de pagamentos da Play, criar o produto, conceder acesso à API e cadastrar os segredos da assinatura. Não publique cobrando usuários antes da validação ponta a ponta por testadores internos.
 
@@ -16,7 +16,7 @@ Na Google Play Console, no app cujo applicationId é `com.dkarson.orcamentoexpre
 
 - Crie a assinatura com ID imutável **`orcamento_express_pro_mensal`**.
 - Crie plano base de **renovação automática mensal** com ID **`mensal`**.
-- Configure o preço no Brasil para **R$ 39,90/mês** (o preço em outros países é definido na Console).
+- **Não cadastre preço definitivo ainda.** Confirmar proposta de valor, mensalidade e eventualmente plano anual com o proprietário antes de configurar a Console.
 - Ative o produto somente após completar requisitos, informações sobre a assinatura e conta de pagamentos.
 - Não anuncie avaliação gratuita ou desconto enquanto não houver oferta configurada no produto.
 - Ofereça cancelamento pela Google Play. O aplicativo inclui link de gestão e restauração de compras.
