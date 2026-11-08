@@ -38,6 +38,7 @@ data class CloudSnapshot(
 class CloudClient(private val context: Context) {
     val baseUrl = BuildConfig.CLOUD_API_URL.trim().trimEnd('/')
     val configured = baseUrl.startsWith("https://")
+    val googleLoginAvailable = configured && BuildConfig.GOOGLE_WEB_CLIENT_ID.isNotBlank()
     private val prefs = context.applicationContext
         .getSharedPreferences("dkarson_cloud_v1", Context.MODE_PRIVATE)
     private val alias = "dkarson_cloud_token"
@@ -49,6 +50,36 @@ class CloudClient(private val context: Context) {
     }
 
     fun email(): String = prefs.getString("email", "").orEmpty()
+
+    /** ID token verificado pelo servidor Google; sem autenticação local simulada. */
+    suspend fun googleLogin(idToken: String): String = withContext(Dispatchers.IO) {
+        check(googleLoginAvailable) { "Configure o login Google no servidor." }
+        val result = post("/v1/cloud/google-sign-in",
+            JSONObject().put("idToken", idToken), authenticated = false)
+        storeToken(result.getString("token"))
+        prefs.edit().putString("email", result.getString("email")).remove("revision").apply()
+        "Conta Google conectada com segurança."
+    }
+
+    suspend fun linkGoogleAccount(idToken: String): String = withContext(Dispatchers.IO) {
+        check(googleLoginAvailable) { "Login Google indisponível." }
+        post("/v1/cloud/link-google", JSONObject().put("idToken", idToken))
+        "Conta Google vinculada ao seu e-mail."
+    }
+
+    suspend fun signOut(): String = withContext(Dispatchers.IO) {
+        try {
+            request("DELETE", "/v1/cloud/session", null, authenticated = true)
+        } finally { logout() }
+        "Você saiu da sua conta neste aparelho."
+    }
+
+    suspend fun deleteOnlineAccount(): String = withContext(Dispatchers.IO) {
+        request("DELETE", "/v1/cloud/account",
+            JSONObject().put("confirm", "EXCLUIR MINHA CONTA"), authenticated = true)
+        logout()
+        "Conta e backups online excluídos. Os dados deste celular não foram apagados."
+    }
 
     suspend fun requestCode(email: String): String = withContext(Dispatchers.IO) {
         require(email.contains('@') && email.length <= 254) { "E-mail inválido." }
@@ -226,11 +257,17 @@ class CloudClient(private val context: Context) {
             } }
             val code = connection.responseCode
             if (code !in 200..299) {
+                val serverMessage = runCatching {
+                    JSONObject(connection.errorStream?.bufferedReader(Charsets.UTF_8)
+                        ?.use { it.readText() } ?: "{}").optString("message")
+                }.getOrDefault("")
                 val reason = when(code) {
                     401 -> "Sua sessão expirou. Entre novamente."
                     402 -> "Plano Online não confirmado no servidor."
                     404 -> "Nenhum backup disponível nesta conta."
-                    409 -> "Conflito: a nuvem tem uma versão mais recente. Confira antes de substituir."
+                    409 -> serverMessage.ifBlank {
+                        "Conflito: a nuvem tem uma versão mais recente. Confira antes de substituir."
+                    }
                     429 -> "Muitas tentativas. Aguarde e tente novamente."
                     else -> "Serviço online indisponível (HTTP $code)."
                 }

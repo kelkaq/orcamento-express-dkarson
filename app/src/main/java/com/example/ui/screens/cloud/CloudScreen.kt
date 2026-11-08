@@ -21,6 +21,13 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.platform.LocalContext
+import androidx.credentials.CredentialManager
+import androidx.credentials.CustomCredential
+import androidx.credentials.GetCredentialRequest
+import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
+import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
+import com.example.BuildConfig
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -57,6 +64,8 @@ fun CloudScreen(
     var busy by remember { mutableStateOf(false) }
     var preview by remember { mutableStateOf<CloudSnapshot?>(null) }
     var lastResult by remember { mutableStateOf("") }
+    var confirmDelete by remember { mutableStateOf(false) }
+    val activityContext = LocalContext.current
 
     fun work(block: suspend () -> String) {
         if (busy) return
@@ -72,11 +81,30 @@ fun CloudScreen(
         }
     }
 
+    fun googleLogin() {
+        if (!client.googleLoginAvailable) return
+        work {
+            val option = GetSignInWithGoogleOption.Builder(BuildConfig.GOOGLE_WEB_CLIENT_ID).build()
+            val request = GetCredentialRequest.Builder().addCredentialOption(option).build()
+            val result = CredentialManager.create(activityContext)
+                .getCredential(context = activityContext, request = request)
+            val credential = result.credential as? CustomCredential
+                ?: error("Credencial Google inválida.")
+            if (credential.type != GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL)
+                error("A conta selecionada não é uma identidade Google.")
+            val idToken = GoogleIdTokenCredential.createFrom(credential.data).idToken
+            val message = if (logged) client.linkGoogleAccount(idToken) else client.googleLogin(idToken)
+            logged = true
+            email = client.email()
+            message
+        }
+    }
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
-                title = { Text("Central Online", color = androidx.compose.ui.graphics.Color.White) },
+                title = { Text("Minha conta e nuvem", color = androidx.compose.ui.graphics.Color.White) },
                 navigationIcon = {
                     TextButton(onClick = onBack) {
                         Text("Voltar", color = androidx.compose.ui.graphics.Color.White)
@@ -95,7 +123,7 @@ fun CloudScreen(
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
                         Text("Sincronização e aprovação de orçamentos", fontWeight = FontWeight.Bold)
-                        Text("Use seu e-mail para acessar cópias na nuvem, recuperar dados em outro celular " +
+                        Text("Entre com Google ou e-mail para identificar sua conta. O uso local continua disponível sem login. Você pode acessar cópias na nuvem, recuperar dados em outro celular " +
                             "e acompanhar respostas de clientes a links de aprovação.")
                         Text("A sincronização online exige o plano Pro Online e conexão com o servidor da DKARSON.")
                         if (!client.configured) {
@@ -109,7 +137,15 @@ fun CloudScreen(
                 item {
                     Card(modifier = Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                            Text("Entrar com código no e-mail", fontWeight = FontWeight.Bold)
+                            Text("Acessar minha conta", fontWeight = FontWeight.Bold)
+                            if (client.googleLoginAvailable) {
+                                Button(
+                                    onClick = { googleLogin() },
+                                    enabled = !busy, modifier = Modifier.fillMaxWidth()
+                                        .testTag("cloud_google_sign_in")
+                                ) { Text("Continuar com Google") }
+                            }
+                            Text("Ou entre com código no e-mail, sem criar senha:")
                             OutlinedTextField(
                                 value = email, onValueChange = { email = it },
                                 label = { Text("E-mail") },
@@ -142,10 +178,27 @@ fun CloudScreen(
             if (logged) {
                 item {
                     Text("Conectado: ${client.email()}", fontWeight = FontWeight.SemiBold)
+                    if (client.googleLoginAvailable) {
+                        OutlinedButton(
+                            enabled = !busy,
+                            onClick = { googleLogin() },
+                            modifier = Modifier.fillMaxWidth().testTag("cloud_google_link")
+                        ) { Text("Vincular minha conta Google") }
+                    }
                     OutlinedButton(
-                        onClick = { client.logout(); logged = false; sent = false; code = "" },
+                        onClick = { work {
+                            val message = client.signOut()
+                            logged = false; sent = false; code = ""
+                            message
+                        } },
+                        enabled = !busy,
                         modifier = Modifier.fillMaxWidth()
                     ) { Text("Sair desta conta") }
+                    TextButton(
+                        enabled = !busy,
+                        onClick = { confirmDelete = true },
+                        modifier = Modifier.fillMaxWidth().testTag("cloud_delete_account")
+                    ) { Text("Excluir minha conta e backups online") }
                 }
                 item {
                     Card(modifier = Modifier.fillMaxWidth()) {
@@ -215,6 +268,24 @@ fun CloudScreen(
                 item { Text(lastResult) }
             }
         }
+    }
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("Excluir sua conta online?") },
+            text = { Text("Exclui sua conta, sessão e backups hospedados no servidor. Não apaga seus orçamentos neste aparelho nem cancela a assinatura na Google Play. Não é possível desfazer.") },
+            confirmButton = {
+                Button(enabled = !busy, onClick = {
+                    confirmDelete = false
+                    work {
+                        val message = client.deleteOnlineAccount()
+                        logged = false; sent = false; code = ""
+                        message
+                    }
+                }) { Text("Confirmar exclusão online") }
+            },
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancelar") } }
+        )
     }
     preview?.let { data ->
         AlertDialog(
