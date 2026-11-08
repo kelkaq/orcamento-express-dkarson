@@ -16,6 +16,7 @@ const host=Deno.env.get('SUPABASE_URL')||'';
 const secret=Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')||'';
 const anon=Deno.env.get('SUPABASE_ANON_KEY')||'';
 const publicBase=(Deno.env.get('PUBLIC_EDGE_BASE_URL')||'').replace(/\/$/,'');
+const supportEmail=(Deno.env.get('SUPPORT_EMAIL')||'').trim();
 if(!host.startsWith('https://')||!secret||!anon||!publicBase.startsWith('https://'))
   throw new Error('Supabase URL e chaves de serviço não configuradas');
 const svc=createClient(host,secret,{auth:{persistSession:false,autoRefreshToken:false}});
@@ -430,7 +431,8 @@ const privacyText='<p>O Orçamento Express armazena orçamentos, clientes e docu
   '<p>Você pode exportar seus dados no próprio aplicativo e solicitar a exclusão da conta online '+
   'em Empresa → Minha conta → Excluir conta. A exclusão não cancela assinaturas na Google Play.</p>'+
   '<p>O backup online é versionado e não representa sincronização colaborativa em tempo real. '+
-  'Para suporte ou questões de privacidade, utilize o contato informado na ficha oficial do aplicativo na Google Play.</p>';
+  'Para suporte ou questões de privacidade, utilize o contato informado na ficha oficial do aplicativo na Google Play.</p>'+
+  (supportEmail?'<p>E-mail: <a href="mailto:'+esc(supportEmail)+'">'+esc(supportEmail)+'</a></p>':'');
 Deno.serve(async (req:Request):Promise<Response>=>{
   try{
     const full=new URL(req.url).pathname;

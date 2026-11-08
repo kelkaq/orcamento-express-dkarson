@@ -20,6 +20,7 @@ jobs:
       PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
       OE_ENCRYPTION_KEY_BASE64: ${{ secrets.OE_ENCRYPTION_KEY_BASE64 }}
       PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL: ${{ vars.PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL }}
+      SUPPORT_EMAIL: ${{ vars.SUPPORT_EMAIL }}
     steps:
       - uses: actions/checkout@v4
       - uses: supabase/setup-cli@v3
@@ -38,6 +39,9 @@ jobs:
               exit 1
             fi
           done
+          if [[ ! "${SUPPORT_EMAIL}" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]]; then
+            echo "::error::Configure SUPPORT_EMAIL válido e ativo."; exit 1
+          fi
           if [ -z "${PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL}" ]; then
             echo "::error::PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL não configurado."
             exit 1
@@ -56,6 +60,7 @@ jobs:
           supabase secrets set \
             "PUBLIC_EDGE_BASE_URL=${API}" \
             "PLAY_PACKAGE_NAME=com.dkarson.orcamentoexpress" \
+            "SUPPORT_EMAIL=${SUPPORT_EMAIL}" \
             "OE_ENCRYPTION_KEY_BASE64=${OE_ENCRYPTION_KEY_BASE64}" \
             "PLAY_SERVICE_ACCOUNT_JSON=${PLAY_SERVICE_ACCOUNT_JSON}" \
             "PUBSUB_PUSH_AUDIENCE=${API}/v1/play/rtdn" \

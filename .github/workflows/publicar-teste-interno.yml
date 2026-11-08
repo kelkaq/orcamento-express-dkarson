@@ -17,6 +17,7 @@ jobs:
       BILLING_VERIFY_URL: ${{ vars.BILLING_VERIFY_URL || (vars.SUPABASE_PROJECT_REF != '' && format('https://{0}.supabase.co/functions/v1/orcamento-api/v1/play/verify', vars.SUPABASE_PROJECT_REF) || '') }}
       CLOUD_API_URL: ${{ vars.CLOUD_API_URL || (vars.SUPABASE_PROJECT_REF != '' && format('https://{0}.supabase.co/functions/v1/orcamento-api', vars.SUPABASE_PROJECT_REF) || '') }}
       GOOGLE_WEB_CLIENT_ID: ${{ vars.GOOGLE_WEB_CLIENT_ID }}
+      SUPPORT_EMAIL: ${{ vars.SUPPORT_EMAIL }}
       ANDROID_UPLOAD_KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
       STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
       KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
@@ -41,6 +42,9 @@ jobs:
           }
           [[ "${SUPABASE_PROJECT_REF}" =~ ^[a-z0-9]{20}$ ]] || {
             echo "::error::Configure SUPABASE_PROJECT_REF antes de publicar."; exit 1;
+          }
+          [[ "${SUPPORT_EMAIL}" == *@*.* ]] || {
+            echo "::error::Informe SUPPORT_EMAIL da loja."; exit 1;
           }
           [[ "${GOOGLE_WEB_CLIENT_ID}" == *.apps.googleusercontent.com ]] || {
             echo "::error::Configure GOOGLE_WEB_CLIENT_ID válido."; exit 1;
