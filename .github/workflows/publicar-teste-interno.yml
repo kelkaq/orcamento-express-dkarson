@@ -1,0 +1,86 @@
+name: Publicar AAB na Google Play — teste interno
+
+# Gatilho manual e somente a branch principal; nunca publica em produção sem aprovação.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publicar-teste:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    env:
+      BILLING_VERIFY_URL: ${{ vars.BILLING_VERIFY_URL }}
+      CLOUD_API_URL: ${{ vars.CLOUD_API_URL }}
+      GOOGLE_WEB_CLIENT_ID: ${{ vars.GOOGLE_WEB_CLIENT_ID }}
+      ANDROID_UPLOAD_KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
+      STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+      KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+      PLAY_SERVICE_ACCOUNT_JSON_BASE64: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON_BASE64 }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validar configuração de publicação
+        shell: bash
+        run: |
+          set -euo pipefail
+          for var in ANDROID_UPLOAD_KEYSTORE_BASE64 STORE_PASSWORD KEY_PASSWORD PLAY_SERVICE_ACCOUNT_JSON_BASE64; do
+            if [ -z "${!var}" ]; then
+              echo "::error::Variável protegida ${var} não configurada."
+              exit 1
+            fi
+          done
+          [[ "${BILLING_VERIFY_URL}" == https://* ]] || {
+            echo "::error::Configure BILLING_VERIFY_URL HTTPS."; exit 1;
+          }
+          [[ "${CLOUD_API_URL}" == https://* ]] || {
+            echo "::error::Configure CLOUD_API_URL HTTPS."; exit 1;
+          }
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: ''
+      - name: Android SDK
+        run: sdkmanager --install 'platform-tools' 'platforms;android-36.1' 'build-tools;36.0.0'
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: '9.3.1'
+      - name: Preparar segredos em arquivos temporários
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "KEYSTORE_PATH=${RUNNER_TEMP}/upload.jks" >> "$GITHUB_ENV"
+          echo "PLAY_JSON_PATH=${RUNNER_TEMP}/play-service.json" >> "$GITHUB_ENV"
+          printf '%s' "${ANDROID_UPLOAD_KEYSTORE_BASE64}" | base64 --decode > "${RUNNER_TEMP}/upload.jks"
+          printf '%s' "${PLAY_SERVICE_ACCOUNT_JSON_BASE64}" | base64 --decode > "${RUNNER_TEMP}/play-service.json"
+          chmod 600 "${RUNNER_TEMP}/upload.jks" "${RUNNER_TEMP}/play-service.json"
+      - name: Testar e gerar AAB assinado
+        run: |
+          gradle --no-daemon --no-configuration-cache --max-workers=2 :app:testReleaseUnitTest :app:bundleRelease
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+      - name: Instalar Fastlane
+        run: gem install fastlane --no-document
+      - name: Enviar apenas para faixa de teste interno
+        shell: bash
+        run: |
+          set -euo pipefail
+          fastlane supply \
+            --json_key "${PLAY_JSON_PATH}" \
+            --package_name com.dkarson.orcamentoexpress \
+            --aab app/build/outputs/bundle/release/app-release.aab \
+            --track internal \
+            --skip_upload_metadata true \
+            --skip_upload_images true \
+            --skip_upload_screenshots true
+      - name: Apagar segredos temporários
+        if: always()
+        shell: bash
+        run: |
+          rm -f "${RUNNER_TEMP}/upload.jks" "${RUNNER_TEMP}/play-service.json"
