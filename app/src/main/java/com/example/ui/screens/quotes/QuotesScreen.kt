@@ -106,6 +106,7 @@ fun QuotesScreen(
     onNewQuote: () -> Unit,
     onEditQuote: (Long) -> Unit,
     onViewDetail: (Long) -> Unit,
+    onRestoreData: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -273,7 +274,8 @@ fun QuotesScreen(
                 EmptyQuotesView(
                     searchQuery = searchQuery,
                     selectedStatus = selectedStatus,
-                    onNewQuote = onNewQuote
+                    onNewQuote = onNewQuote,
+                    onRestoreData = onRestoreData
                 )
             } else {
                 LazyColumn(
@@ -700,7 +702,8 @@ fun QuoteCard(
 fun EmptyQuotesView(
     searchQuery: String,
     selectedStatus: String,
-    onNewQuote: () -> Unit
+    onNewQuote: () -> Unit,
+    onRestoreData: () -> Unit
 ) {
     Box(
         modifier = Modifier
@@ -739,7 +742,9 @@ fun EmptyQuotesView(
             Spacer(modifier = Modifier.height(8.dp))
 
             Text(
-                text = if (searchQuery.isNotBlank()) "Tente refinar sua busca ou limpar os filtros." else "Crie seu primeiro orçamento comercial profissional com cálculo automático e geração de PDF.",
+                text = if (searchQuery.isNotBlank() || selectedStatus != "ALL")
+                    "Altere os filtros ou toque em Ver todos para consultar as propostas."
+                    else "Este aplicativo ainda não possui propostas salvas. Se os orçamentos estiverem em outra instalação, recupere-os por backup.",
                 fontSize = 14.sp,
                 color = SlateMuted,
                 modifier = Modifier.padding(horizontal = 16.dp),
@@ -756,6 +761,23 @@ fun EmptyQuotesView(
                     Icon(Icons.Default.Add, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("Criar Primeiro Orçamento")
+                }
+                if (com.example.BuildConfig.DEBUG) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = onRestoreData,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.testTag("empty_history_restore_backup")
+                    ) {
+                        Text("Recuperar histórico de outra versão", fontSize = 12.sp)
+                    }
+                    Text(
+                        "Na instalação anterior, abra Empresa > Backup > Exportar. Nesta versão, entre em Empresa > Backup > Restaurar.",
+                        color = SlateMuted,
+                        fontSize = 11.sp,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        modifier = Modifier.padding(12.dp)
+                    )
                 }
             }
         }
