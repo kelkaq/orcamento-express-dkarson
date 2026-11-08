@@ -188,6 +188,13 @@ fun QuoteEditorScreen(
                     }
                 },
                 actions = {
+                    IconButton(
+                        onClick = { showStandaloneCalculator = true },
+                        modifier = Modifier.testTag("editor_calculator_toolbar")
+                    ) {
+                        Icon(Icons.Default.Calculate, contentDescription = "Abrir calculadora",
+                            tint = Color.White)
+                    }
                     Button(
                         onClick = { viewModel.saveQuote { savedId -> onQuoteSaved(savedId) } },
                         colors = ButtonDefaults.buttonColors(containerColor = EmeraldAccent),
@@ -213,6 +220,20 @@ fun QuoteEditorScreen(
                 .fillMaxSize()
                 .background(SlateLightBg)
         ) {
+            // Calculadora destacada no início do formulário, sem rolar até o catálogo.
+            item {
+                OutlinedButton(
+                    onClick = { showStandaloneCalculator = true },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
+                        .testTag("btn_calculator_visible")
+                ) {
+                    Icon(Icons.Default.Calculate, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("CALCULADORA RÁPIDA", fontWeight = FontWeight.Bold)
+                }
+            }
+
+
             // Header: Quote Number & Status
             item {
                 Card(
@@ -451,19 +472,6 @@ fun QuoteEditorScreen(
                             Text("Item", fontSize = 12.sp)
                         }
                     }
-                }
-            }
-
-            // Calculadora principal, sempre visível no fluxo de orçamento.
-            item {
-                OutlinedButton(
-                    onClick = { showStandaloneCalculator = true },
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
-                        .testTag("btn_calculator_visible")
-                ) {
-                    Icon(Icons.Default.Calculate, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Abrir calculadora rápida")
                 }
             }
 
