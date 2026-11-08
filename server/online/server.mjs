@@ -4,7 +4,8 @@ import {Pool} from 'pg';
 import nodemailer from 'nodemailer';
 import {GoogleAuth,OAuth2Client} from 'google-auth-library';
 import {assertBackup,assertQuoteForApproval,createCrypto,esc,hashSecret,
-  normalizeEmail,otpHash,safeEqualHex,subscriptionStatus,token,googleIdentityClaims} from './lib.mjs';
+  normalizeEmail,otpHash,safeEqualHex,subscriptionStatus,token,googleIdentityClaims,
+  parsePlayRtdnEnvelope} from './lib.mjs';
 import {readFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import {dirname,join} from 'node:path';
@@ -20,6 +21,8 @@ const config={
   smtpPort:Number(process.env.SMTP_PORT||587),
   mailFrom:process.env.MAIL_FROM||'',
   googleClientId:process.env.GOOGLE_WEB_CLIENT_ID||'',
+  pushAudience:process.env.PUBSUB_PUSH_AUDIENCE||'',
+  pushEmail:process.env.PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL||'',
   dbUrl:process.env.DATABASE_URL||''
 };
 if(!config.publicUrl.startsWith('https://') || config.otpKey.length<32 ||
@@ -358,6 +361,40 @@ async function handleCloud(req,res,path) {
   }
   return reply(res,404,{error:'not_found'});
 }
+/**
+ * Push autenticado do Cloud Pub/Sub. O evento não prova pagamento: sempre
+ * reconfere o token na Android Publisher API antes de atualizar a conta.
+ */
+async function handlePlayNotification(req,res) {
+  if(!config.pushAudience || !config.pushEmail)
+    return reply(res,503,{error:'pubsub_not_configured'});
+  const auth=String(req.headers.authorization||'');
+  if(!auth.startsWith('Bearer '))return reply(res,401,{error:'push_auth_required'});
+  const ticket=await googleIdentityClient.verifyIdToken({
+    idToken:auth.substring(7).trim(),audience:config.pushAudience
+  });
+  const claims=ticket.getPayload();
+  if(!claims?.email_verified || claims.email!==config.pushEmail)
+    return reply(res,403,{error:'push_service_account_mismatch'});
+
+  const envelope=await readBody(req,15_000);
+  const notice=parsePlayRtdnEnvelope(envelope,config.packageName,config.subscription);
+  if(!notice)return reply(res,200,{ok:true,ignored:true});
+  const hashed=hashSecret(notice.purchaseToken);
+  const rows=await pool.query('SELECT id FROM users WHERE play_token_hash=$1',[hashed]);
+  if(!rows.rowCount)return reply(res,200,{ok:true,unlinked:true});
+
+  const status=await googleSubscription(notice.purchaseToken);
+  if(status.active) {
+    await pool.query(`UPDATE users SET online_expires_at=to_timestamp($1/1000.0),
+      play_checked_at=NOW() WHERE id=$2 AND play_token_hash=$3`,
+      [status.expiresAtMillis,rows.rows[0].id,hashed]);
+  } else {
+    await pool.query(`UPDATE users SET online_expires_at=NULL,play_checked_at=NOW()
+      WHERE id=$1 AND play_token_hash=$2`,[rows.rows[0].id,hashed]);
+  }
+  return reply(res,200,{ok:true,active:status.active});
+}
 function approvalHtml(quote, token, status='PENDING') {
   const rows=quote.items.map(item=>`<li>${esc(item.description)} —
     ${esc(item.quantity)} ${esc(item.unit)} × R$ ${Number(item.unitPrice).toFixed(2)}</li>`).join('');
@@ -429,6 +466,8 @@ const handler=createServer(async(req,res)=>{
       });
       return res.end(data);
     }
+    if(req.method==='POST' && path==='/v1/play/rtdn')
+      return await handlePlayNotification(req,res);
     if(path.startsWith('/a/'))return await handleApproval(req,res,path);
     if(path.startsWith('/v1/cloud/')) {
       limit('ip:'+req.socket.remoteAddress,200);

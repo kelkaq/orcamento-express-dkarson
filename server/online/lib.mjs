@@ -5,6 +5,26 @@ export const ALLOWED_STATES=new Set([
   'SUBSCRIPTION_STATE_CANCELED'
 ]);
 
+/** Decodifica apenas o envelope Pub/Sub. Estado de assinatura é sempre consultado no Google Play. */
+export function parsePlayRtdnEnvelope(envelope, packageName, subscriptionId) {
+  if(!envelope || typeof envelope?.message?.data!=='string')
+    throw Object.assign(new Error('Envelope Pub/Sub inválido'),{status:400});
+  let data;
+  try {
+    const text=Buffer.from(envelope.message.data,'base64').toString('utf8');
+    data=JSON.parse(text);
+  } catch {
+    throw Object.assign(new Error('Notificação inválida'),{status:400});
+  }
+  if(data?.packageName!==packageName) return null;
+  const subscription=data.subscriptionNotification;
+  if(!subscription || subscription.subscriptionId!==subscriptionId) return null;
+  const purchaseToken=subscription.purchaseToken;
+  if(typeof purchaseToken!=='string'||purchaseToken.length<16||purchaseToken.length>4096)
+    throw Object.assign(new Error('Token inválido'),{status:400});
+  return {purchaseToken,type:Number(subscription.notificationType)||0};
+}
+
 export function normalizeEmail(value) {
   if(typeof value!=='string') throw new Error('E-mail inválido');
   const email=value.trim().toLowerCase();

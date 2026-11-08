@@ -1,40 +1,33 @@
-> **NOVO: Compilação automática pelo GitHub Actions** — consulte `PASSO_A_PASSO_COMPILAR_APK.md`. O aplicativo de teste é instalado ao lado da versão existente e não compartilha seu banco de dados. O projeto ainda não foi compilado após estas alterações.
-
 # Orçamento Express — DKARSON
 
-Aplicativo Android nativo em **Kotlin, Jetpack Compose e Room**, com dados locais.
+Aplicativo Android nativo em **Kotlin + Jetpack Compose + Room**, com orçamentos, clientes, catálogo, custos e preços, ordens de serviço, pagamentos, recibos, agenda, notificações e backup.
 
-## Continuação após exportação do Google AI Studio
+## Versão de desenvolvimento 1.3 (08/11/2026)
 
-Este pacote contém somente o **código-fonte** atualizado. Não inclui a chave de assinatura privada, APK ou AAB antigos. Os binários do ZIP original **não contêm as alterações deste pacote**.
+O desenvolvimento ativo está na branch `feat/contas-sobre-homologacao-20261108`. A branch `main` continua na versão anterior até a homologação.
 
-### O que foi alterado nesta revisão
+### Android
+- **Gratuito**: até 5 novos orçamentos/mês, históricos, PDFs, clientes, agenda, calculadora simples e backup local.
+- **Pro Offline**: compra única verificada via Google Play; orçamentos ilimitados, cálculo por profissão, controle de custos/lucro, modelos, ordens de serviço e recibos.
+- **Pro Online**: assinatura mensal validada via Google Play; além das ferramentas Pro, login e backups na nuvem, histórico web somente leitura e aprovação por link.
+- **Teste de proprietário**: apenas o APK debug tem botão “Ativar Pro de teste” na tela de planos. Não acessa servidor online e não desbloqueia compras reais.
+- **Conta**: e-mail/código e login Google Credential Manager, com ID token validado pelo servidor quando a configuração está presente; vinculação protegida de contas existentes.
+- **Sobre o aplicativo**: versão/código real do build, ambiente, plano, armazenamento e orientações de suporte.
+- **Backup**: arquivos de dados exportáveis e restauração com backup preventivo; nunca apagar a versão anterior antes de verificar a exportação.
 
-- Calculadora integrada com botão **Usar resultado** em preço unitário, desconto e frete/deslocamento.
-- Entrada de números com estado local para não zerar enquanto a pessoa digita vírgula ou apaga parcialmente.
-- Pesquisa instantânea de clientes e do catálogo; seleção de vários itens sem fechar a janela.
-- Número de orçamento somente leitura no formulário.
-- Métrica de propostas **aprovadas e concluídas**, reativa a alterações no Room, sem chamar isso de receita recebida.
-- Remoção do anúncio fictício e do botão que ativava Premium sem compra validada.
-- Validação mais defensiva de backups; snapshot transacional e `fsync` no backup preventivo.
-- Uso da chave de debug local padrão do Android Gradle Plugin, sem depender de `debug.keystore` fixo.
-- Testes unitários do motor da calculadora.
+### Servidor e persistência
+- `server/online`: Node 22, PostgreSQL e SMTP, tokens de sessão, autenticação, backups cifrados AES-256-GCM, aprovações, exclusão da conta e notificações de assinatura via Pub/Sub autenticado.
+- `server/play-billing`: validação e reconhecimento de compras pela Android Publisher API.
+- **Supabase opcional**: hospede o PostgreSQL do servidor com conexão SESSION/TLS. Não exponha credenciais do banco no APK. Usar Supabase NÃO substitui a API e as regras de acesso do servidor.
 
-### Execução
+### Como testar
+1. Abra **Actions → Gerar APK de teste — DKARSON** na branch de desenvolvimento.
+2. Baixe `ORCAMENTO_EXPRESS_DKARSON_TESTE_APK` em Artifacts, extraia e instale.
+3. Confira **Empresa → Conta e informações → Sobre o aplicativo**. Em **Conhecer Pro**, ative as ferramentas de teste e avalie orçamentos, custos, OS e recibos.
+4. Rode testes pelo GitHub Actions; não confunda build de sucesso com testes manuais em telefone.
+5. Conta Google e serviços Online só funcionam quando `CLOUD_API_URL`, `GOOGLE_WEB_CLIENT_ID` e o servidor estiverem configurados. O APK de teste não faz cobranças reais.
 
-1. Abra a pasta como projeto Android/Gradle num ambiente com **JDK, Android SDK e Gradle** compatíveis.
-2. Execute os testes com `gradle testDebugUnitTest` ou pela IDE.
-3. Compile um APK de **debug para teste** (`gradle assembleDebug`).
-4. Faça um backup dos dados da versão instalada antes de testar qualquer atualização.
-5. Para gerar o AAB de produção, use **sua chave privada de upload** em local seguro e as variáveis `KEYSTORE_PATH`, `STORE_PASSWORD`, `KEY_PASSWORD`. Nunca forneça essas senhas ao repositório nem ao chat.
-6. Somente publique depois de testes em Android real e conferência dos requisitos da Play Console.
+### Publicação comercial
+É necessário **Play Console verificada**, compras cadastradas, assinatura configurada, API Android Publisher, chave privada de upload, HTTPS, domínio, banco e SMTP, política de privacidade, suporte, exclusão de conta e testes internos pela loja. Essas ações exigem configuração das contas do proprietário e não são automatizáveis apenas pelo repositório.
 
-A versão de aplicativo instalada no telefone não muda até ser compilada e instalada uma nova versão assinada de forma compatível. Para atualizar sem apagar dados, o `applicationId` deve permanecer `com.dkarson.orcamentoexpress` e a assinatura deve ser compatível com a anterior.
-
-### Limitações desta revisão
-
-Não foi possível compilar um APK/AAB nesta sessão porque o ambiente não contém Android SDK/Gradle. O motor matemático foi compilado e exercitado separadamente com `kotlinc`, mas **a compilação Android e os testes de tela ainda precisam ocorrer**.
-
-Os módulos de ordem de serviço, pagamentos/recibos, rascunhos persistidos, reconhecimento de voz, relatórios por período e compras Google Play Billing **ainda não foram implementados nesta revisão**. Eles exigem novos modelos de dados, migrações e testes em conjunto, sem arriscar os dados reais do usuário.
-
-Para publicação, a política de privacidade precisa de revisão jurídica e de uma URL pública adequada; o texto mostrado dentro do aplicativo não substitui essa exigência.
+Veja `docs/PLANOS_E_PUBLICACAO.md`, `PLAY_STORE_LANCAMENTO.md` e `docs/OPERACAO_GOOGLE_E_SUPABASE.md` para os detalhes.

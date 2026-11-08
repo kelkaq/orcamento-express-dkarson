@@ -1,7 +1,8 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {assertBackup,assertQuoteForApproval,createCrypto,
-  normalizeEmail,esc,subscriptionStatus,otpHash,safeEqualHex,googleIdentityClaims} from './lib.mjs';
+  normalizeEmail,esc,subscriptionStatus,otpHash,safeEqualHex,googleIdentityClaims,
+  parsePlayRtdnEnvelope} from './lib.mjs';
 
 test('invalid backups cannot overwrite a user history',()=>{
   assert.throws(()=>assertBackup('{"app":"Other","version":4}'));
@@ -47,4 +48,19 @@ test('Google ID requires email verification, subject, and canonical email',()=>{
     email:'user@gmail.com',email_verified:false,sub:'12345678abcde'}));
   assert.throws(()=>googleIdentityClaims({
     email:'user@gmail.com',email_verified:true,sub:''}));
+});
+
+test('Google Play notification parser accepts only the subscribed app and subscription',()=>{
+  const sample = (packageName='com.dkarson.orcamentoexpress',subscriptionId='orcamento_express_pro_mensal') => ({
+    message:{data:Buffer.from(JSON.stringify({packageName,subscriptionNotification:{
+      subscriptionId,purchaseToken:'token_example_string_1234567890',notificationType:2
+    }})).toString('base64')}
+  });
+  const id='orcamento_express_pro_mensal', pkg='com.dkarson.orcamentoexpress';
+  assert.deepEqual(parsePlayRtdnEnvelope(sample(),pkg,id),{
+    purchaseToken:'token_example_string_1234567890',type:2
+  });
+  assert.equal(parsePlayRtdnEnvelope(sample('other.app'),pkg,id),null);
+  assert.equal(parsePlayRtdnEnvelope(sample(pkg,'other_sku'),pkg,id),null);
+  assert.throws(()=>parsePlayRtdnEnvelope({message:{data:'abc'}},pkg,id));
 });

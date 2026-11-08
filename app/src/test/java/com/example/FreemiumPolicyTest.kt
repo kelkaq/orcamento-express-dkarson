@@ -97,6 +97,7 @@ class FreemiumPolicyTest {
         val store = EntitlementStore(context)
         store.revokeOffline()
         store.revokeOnline()
+        store.setDemoEnabled(false)
         assertFalse(store.isProNow())
         // Somente o resultado validado pelo backend concede direito;
         // vencimento passado nunca libera a assinatura online.
@@ -104,5 +105,25 @@ class FreemiumPolicyTest {
         assertFalse(store.isProNow())
         store.revokeOnline()
         store.revokeOffline()
+        store.setDemoEnabled(false)
+    }
+
+    @Test fun `debug demo unlocks offline tools but never claims online subscription`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val store = EntitlementStore(context)
+        store.revokeOffline()
+        store.revokeOnline()
+        store.setDemoEnabled(false)
+        try {
+            assertTrue(BuildConfig.DEBUG)
+            store.setDemoEnabled(true)
+            assertTrue(store.isDemoEnabled())
+            assertTrue(store.isProNow())
+            assertFalse(store.isOnlineNow())
+            assertEquals(com.example.billing.PlanTier.OFFLINE, store.tierNow())
+        } finally {
+            store.setDemoEnabled(false)
+        }
+        assertFalse(store.isProNow())
     }
 }

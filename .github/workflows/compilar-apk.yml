@@ -11,6 +11,7 @@ env:
   # URL pública (sem credenciais) do servidor de verificação seguro.
   BILLING_VERIFY_URL: ${{ vars.BILLING_VERIFY_URL }}
   CLOUD_API_URL: ${{ vars.CLOUD_API_URL }}
+  GOOGLE_WEB_CLIENT_ID: ${{ vars.GOOGLE_WEB_CLIENT_ID }}
 
 # Evita compilar commits antigos repetidamente: só a revisão mais recente permanece ativa.
 concurrency:
