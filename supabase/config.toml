@@ -1,0 +1,4 @@
+# Cloud API customiza autenticação: entrada pública apenas OTP, aprovação e RTDN OIDC.
+# Rotas privadas exigem sessão assinada/verificada pela própria função.
+[functions.orcamento-api]
+verify_jwt = false
