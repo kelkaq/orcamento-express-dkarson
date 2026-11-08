@@ -36,3 +36,57 @@ jobs:
         run: |
           node --test supabase/functions/orcamento-api/*.test.mjs
           deno check supabase/functions/orcamento-api/index.ts
+
+  banco-postgresql:
+    name: Validar migração Supabase e isolamento de dados
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: orcamento_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d orcamento_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preparar cliente PostgreSQL
+        run: |
+          command -v psql || (sudo apt-get update -qq && sudo apt-get install -qq -y postgresql-client)
+      - name: Validar migração e proteção RLS
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PGHOST=127.0.0.1 PGPORT=5432 PGUSER=postgres PGDATABASE=orcamento_test
+          psql -v ON_ERROR_STOP=1 <<'SQL'
+          DO $$
+          BEGIN
+            IF NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='anon') THEN CREATE ROLE anon; END IF;
+            IF NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='authenticated') THEN CREATE ROLE authenticated; END IF;
+            IF NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='service_role') THEN CREATE ROLE service_role BYPASSRLS; END IF;
+          END $$;
+          SQL
+          psql -v ON_ERROR_STOP=1 -f supabase/migrations/20261108210000_orcamento_express.sql
+          psql -v ON_ERROR_STOP=1 -f supabase/migrations/20261108210000_orcamento_express.sql
+          psql -v ON_ERROR_STOP=1 <<'SQL'
+          DO $$
+          BEGIN
+            IF NOT (SELECT relrowsecurity FROM pg_class WHERE relname='oe_users' AND relnamespace='public'::regnamespace)
+               THEN RAISE EXCEPTION 'RLS não habilitado'; END IF;
+            IF has_table_privilege('anon','public.oe_users','SELECT')
+               OR has_table_privilege('authenticated','public.oe_backups','SELECT')
+               THEN RAISE EXCEPTION 'Dados expostos a clientes'; END IF;
+            IF NOT public.oe_check_rate_limit('ci:test',2,60) THEN RAISE EXCEPTION 'Primeira tentativa'; END IF;
+            IF NOT public.oe_check_rate_limit('ci:test',2,60) THEN RAISE EXCEPTION 'Segunda tentativa'; END IF;
+            IF public.oe_check_rate_limit('ci:test',2,60) THEN RAISE EXCEPTION 'Limite não aplicado'; END IF;
+          END $$;
+          SQL
