@@ -95,11 +95,14 @@ class FreemiumPolicyTest {
     @Test fun `unverified subscription never activates Pro`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val store = EntitlementStore(context)
-        store.revoke()
+        store.revokeOffline()
+        store.revokeOnline()
         assertFalse(store.isProNow())
-        // Only backend-verified path may set a valid cached entitlement.
-        store.grantVerified(System.currentTimeMillis() - 1L)
+        // Somente o resultado validado pelo backend concede direito;
+        // vencimento passado nunca libera a assinatura online.
+        store.grantOnlineVerified(System.currentTimeMillis() - 1L)
         assertFalse(store.isProNow())
-        store.revoke()
+        store.revokeOnline()
+        store.revokeOffline()
     }
 }
