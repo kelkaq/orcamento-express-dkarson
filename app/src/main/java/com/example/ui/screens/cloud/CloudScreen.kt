@@ -96,6 +96,10 @@ fun CloudScreen(
             val message = if (logged) client.linkGoogleAccount(idToken) else client.googleLogin(idToken)
             logged = true
             email = client.email()
+            val subscription = billingManager.onlinePurchaseToken()
+            if (subscription != null) {
+                runCatching { client.linkSubscription(subscription) }
+            }
             message
         }
     }
@@ -161,6 +165,9 @@ fun CloudScreen(
                                     if (sent) work {
                                         val message = client.confirmCode(email, code)
                                         logged = true
+                                        billingManager.onlinePurchaseToken()?.let { token ->
+                                            runCatching { client.linkSubscription(token) }
+                                        }
                                         message
                                     } else work {
                                         val message = client.requestCode(email)

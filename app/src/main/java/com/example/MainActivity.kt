@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -93,6 +94,15 @@ fun OrcamentoExpressApp(
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
     val billingState by billingManager.state.collectAsStateWithLifecycle()
+    // Se já existe conta conectada, vincula a assinatura após verificação da Play.
+    // O servidor confere novamente o token; falha de rede nunca concede acesso.
+    LaunchedEffect(billingState.isOnline, billingManager.onlinePurchaseToken()) {
+        if (billingState.isOnline && cloudClient.configured && cloudClient.isLoggedIn()) {
+            billingManager.onlinePurchaseToken()?.let { token ->
+                runCatching { cloudClient.linkSubscription(token) }
+            }
+        }
+    }
     val goToPro: () -> Unit = {
         navController.navigate(Screen.Pro.route) { launchSingleTop = true }
     }
