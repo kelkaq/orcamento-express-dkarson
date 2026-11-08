@@ -182,12 +182,16 @@ fun QuotesScreen(
             }
         }
     ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
+        // Lista única: mesmo com o painel financeiro expandido, o usuário sempre pode
+        // rolar até os orçamentos, sem uma segunda lista limitada a altura zero.
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(innerPadding)
+                .testTag("home_main_scroll_history"),
+            contentPadding = PaddingValues(bottom = 96.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             // O histórico é a ação principal da Home. Indicadores são compactos por padrão.
+            item {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 2.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -206,8 +210,10 @@ fun QuotesScreen(
                     modifier = Modifier.testTag("home_show_all_quotes")
                 ) { Text("Ver todos", fontSize = 12.sp) }
             }
+            }
 
             // O painel financeiro não deve empurrar o histórico para fora da tela.
+            item {
             DashboardMetricsBanner(
                 metrics = metrics,
                 selectedPeriod = selectedPeriod,
@@ -215,8 +221,10 @@ fun QuotesScreen(
                 expanded = financeExpanded,
                 onToggleExpanded = { financeExpanded = !financeExpanded }
             )
+            }
 
             // Search & Filters
+            item {
             Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
                 OutlinedTextField(
                     value = searchQuery,
@@ -268,23 +276,23 @@ fun QuotesScreen(
                     }
                 }
             }
+            }
 
             // Quotes List
             if (quotes.isEmpty()) {
+                item {
                 EmptyQuotesView(
                     searchQuery = searchQuery,
                     selectedStatus = selectedStatus,
                     onNewQuote = onNewQuote,
                     onRestoreData = onRestoreData
                 )
+                }
             } else {
-                LazyColumn(
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 88.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.weight(1f).fillMaxWidth().testTag("home_quotes_history_list")
-                ) {
                     items(quotes, key = { it.quote.id }) { quoteWithItems ->
                         QuoteCard(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
+                                .testTag("home_quotes_history_list"),
                             quoteWithItems = quoteWithItems,
                             hasPayments = paidQuoteIds.contains(quoteWithItems.quote.id),
                             onCardClick = { onViewDetail(quoteWithItems.quote.id) },
@@ -353,7 +361,6 @@ fun QuotesScreen(
                             }
                         )
                     }
-                }
             }
         }
     }
@@ -707,7 +714,7 @@ fun EmptyQuotesView(
 ) {
     Box(
         modifier = Modifier
-            .fillMaxSize()
+            .fillMaxWidth()
             .padding(32.dp),
         contentAlignment = Alignment.Center
     ) {
