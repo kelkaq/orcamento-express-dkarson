@@ -291,8 +291,7 @@ fun QuotesScreen(
             } else {
                     items(quotes, key = { it.quote.id }) { quoteWithItems ->
                         QuoteCard(
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
-                                .testTag("home_quotes_history_list"),
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                             quoteWithItems = quoteWithItems,
                             hasPayments = paidQuoteIds.contains(quoteWithItems.quote.id),
                             onCardClick = { onViewDetail(quoteWithItems.quote.id) },
