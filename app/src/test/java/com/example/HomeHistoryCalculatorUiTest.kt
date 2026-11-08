@@ -4,7 +4,8 @@ import android.content.Context
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -50,7 +51,7 @@ class HomeHistoryCalculatorUiTest {
     @After
     fun closeDb() { db.close() }
 
-    private fun showHome() {
+    private fun showHome(): QuotesViewModel {
         val quotes = QuotesViewModel(repository)
         val company = CompanyViewModel(repository)
         compose.setContent {
@@ -65,6 +66,7 @@ class HomeHistoryCalculatorUiTest {
                 )
             }
         }
+        return quotes
     }
 
     @Test
@@ -78,7 +80,7 @@ class HomeHistoryCalculatorUiTest {
 
     @Test
     fun `a saved quote appears in accessible home history`() {
-        runBlocking {
+        val id = runBlocking {
             repository.saveQuoteWithItems(
                 QuoteEntity(quoteNumber = "#ORC-2026-1000", clientName = "João",
                     total = 120.0, status = "APPROVED"),
@@ -86,13 +88,13 @@ class HomeHistoryCalculatorUiTest {
                     quantity = 1.0, unitPrice = 120.0, totalPrice = 120.0))
             )
         }
-        showHome()
+        val quotesViewModel = showHome()
         compose.onNodeWithTag("home_history_title").assertIsDisplayed()
         compose.waitUntil(timeoutMillis = 8000) {
-            compose.onAllNodesWithTag("home_quotes_history_list")
-                .fetchSemanticsNodes().isNotEmpty()
+            quotesViewModel.quotesList.value.isNotEmpty()
         }
-        assertTrue(compose.onAllNodesWithTag("home_quotes_history_list")
-            .fetchSemanticsNodes().isNotEmpty())
+        compose.onNodeWithTag("home_main_scroll_history")
+            .performScrollToNode(hasTestTag("quote_card_$id"))
+        compose.onNodeWithTag("quote_card_$id").assertIsDisplayed()
     }
 }
