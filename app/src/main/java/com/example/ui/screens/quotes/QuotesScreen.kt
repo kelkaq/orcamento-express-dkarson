@@ -27,6 +27,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
@@ -73,8 +74,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -92,6 +95,7 @@ import com.example.ui.viewmodel.CompanyViewModel
 import com.example.ui.viewmodel.QuotesViewModel
 import com.example.util.Formatters
 import com.example.util.PdfGenerator
+import com.example.ui.components.CalculatorDialog
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -106,6 +110,7 @@ fun QuotesScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val clipboard = LocalClipboardManager.current
     val snackbarHostState = remember { SnackbarHostState() }
 
     val quotes by viewModel.quotesList.collectAsStateWithLifecycle()
@@ -124,6 +129,8 @@ fun QuotesScreen(
     val companyProfile by companyViewModel.companyProfile.collectAsStateWithLifecycle()
 
     var quoteToDelete by remember { mutableStateOf<QuoteEntity?>(null) }
+    var showQuickCalculator by remember { mutableStateOf(false) }
+    var financeExpanded by remember { mutableStateOf(false) }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -143,6 +150,17 @@ fun QuotesScreen(
                             fontSize = 12.sp,
                             color = Color.White.copy(alpha = 0.8f)
                         )
+                    }
+                },
+                actions = {
+                    TextButton(
+                        onClick = { showQuickCalculator = true },
+                        modifier = Modifier.testTag("home_calculator_top_button")
+                    ) {
+                        Icon(Icons.Default.Calculate, contentDescription = null, tint = Color.White,
+                            modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Calculadora", color = Color.White, fontSize = 12.sp)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -168,11 +186,33 @@ fun QuotesScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            // Metrics Banner
+            // O histórico é a ação principal da Home. Indicadores são compactos por padrão.
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 2.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Histórico de orçamentos", fontWeight = FontWeight.Bold, fontSize = 17.sp,
+                        color = NavyPrimary, modifier = Modifier.testTag("home_history_title"))
+                    Text("Consulte, duplique ou envie suas propostas", fontSize = 11.sp, color = SlateMuted)
+                }
+                OutlinedButton(
+                    onClick = {
+                        viewModel.onSearchQueryChanged("")
+                        viewModel.onStatusFilterChanged("ALL")
+                    },
+                    modifier = Modifier.testTag("home_show_all_quotes")
+                ) { Text("Ver todos", fontSize = 12.sp) }
+            }
+
+            // O painel financeiro não deve empurrar o histórico para fora da tela.
             DashboardMetricsBanner(
                 metrics = metrics,
                 selectedPeriod = selectedPeriod,
-                onPeriodChange = viewModel::onPeriodChanged
+                onPeriodChange = viewModel::onPeriodChanged,
+                expanded = financeExpanded,
+                onToggleExpanded = { financeExpanded = !financeExpanded }
             )
 
             // Search & Filters
@@ -239,7 +279,7 @@ fun QuotesScreen(
                 LazyColumn(
                     contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 88.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier.weight(1f).fillMaxWidth().testTag("home_quotes_history_list")
                 ) {
                     items(quotes, key = { it.quote.id }) { quoteWithItems ->
                         QuoteCard(
@@ -316,6 +356,20 @@ fun QuotesScreen(
         }
     }
 
+    if (showQuickCalculator) {
+        CalculatorDialog(
+            onDismiss = { showQuickCalculator = false },
+            confirmLabel = "Copiar resultado",
+            onUseResult = { result ->
+                val value = java.math.BigDecimal.valueOf(result).stripTrailingZeros()
+                    .toPlainString().replace('.', ',')
+                clipboard.setText(AnnotatedString(value))
+                showQuickCalculator = false
+                scope.launch { snackbarHostState.showSnackbar("Resultado copiado. Você pode colar em um orçamento.") }
+            }
+        )
+    }
+
     // Delete confirmation dialog
     quoteToDelete?.let { quote ->
         AlertDialog(
@@ -347,7 +401,9 @@ fun QuotesScreen(
 fun DashboardMetricsBanner(
     metrics: com.example.data.repository.DashboardMetrics,
     selectedPeriod: String,
-    onPeriodChange: (String) -> Unit
+    onPeriodChange: (String) -> Unit,
+    expanded: Boolean,
+    onToggleExpanded: () -> Unit
 ) {
     Card(
         shape = RoundedCornerShape(16.dp),
@@ -368,7 +424,18 @@ fun DashboardMetricsBanner(
                 fontWeight = FontWeight.Bold,
                 color = EmeraldAccent
             )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text("Recebido: ${Formatters.formatCurrency(metrics.totalReceived)}",
+                fontWeight = FontWeight.SemiBold, color = Color.White, fontSize = 12.sp)
+            TextButton(
+                onClick = onToggleExpanded,
+                modifier = Modifier.testTag("financial_details_toggle")
+            ) {
+                Text(if (expanded) "Ocultar detalhes financeiros" else "Ver painel financeiro",
+                    color = Color.White, fontSize = 12.sp)
+            }
 
+            if (expanded) {
             Spacer(modifier = Modifier.height(10.dp))
             LazyRow(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                 items(listOf(
@@ -422,8 +489,9 @@ fun DashboardMetricsBanner(
             Text("As propostas usam a data de emissão; os recebimentos usam a data informada no pagamento.",
                 fontSize = 10.sp, color = Color.White.copy(alpha = 0.6f))
 
-            Spacer(modifier = Modifier.height(12.dp))
+            } // expanded
 
+            Spacer(modifier = Modifier.height(4.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
