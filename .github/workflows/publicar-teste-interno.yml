@@ -20,14 +20,14 @@ jobs:
       ANDROID_UPLOAD_KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
       STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
       KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-      PLAY_SERVICE_ACCOUNT_JSON_BASE64: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON_BASE64 }}
+      PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
     steps:
       - uses: actions/checkout@v4
       - name: Validar configuração de publicação
         shell: bash
         run: |
           set -euo pipefail
-          for var in ANDROID_UPLOAD_KEYSTORE_BASE64 STORE_PASSWORD KEY_PASSWORD PLAY_SERVICE_ACCOUNT_JSON_BASE64; do
+          for var in ANDROID_UPLOAD_KEYSTORE_BASE64 STORE_PASSWORD KEY_PASSWORD PLAY_SERVICE_ACCOUNT_JSON; do
             if [ -z "${!var}" ]; then
               echo "::error::Variável protegida ${var} não configurada."
               exit 1
@@ -64,8 +64,15 @@ jobs:
           echo "KEYSTORE_PATH=${RUNNER_TEMP}/upload.jks" >> "$GITHUB_ENV"
           echo "PLAY_JSON_PATH=${RUNNER_TEMP}/play-service.json" >> "$GITHUB_ENV"
           printf '%s' "${ANDROID_UPLOAD_KEYSTORE_BASE64}" | base64 --decode > "${RUNNER_TEMP}/upload.jks"
-          printf '%s' "${PLAY_SERVICE_ACCOUNT_JSON_BASE64}" | base64 --decode > "${RUNNER_TEMP}/play-service.json"
+          printf '%s' "${PLAY_SERVICE_ACCOUNT_JSON}" > "${RUNNER_TEMP}/play-service.json"
           chmod 600 "${RUNNER_TEMP}/upload.jks" "${RUNNER_TEMP}/play-service.json"
+      - name: Confirmar que API Supabase está realmente ativa
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --retry 3 "${CLOUD_API_URL}/health" | grep '"ok":true'
+          curl --fail --silent --show-error --retry 3 "${CLOUD_API_URL}/privacy" >/dev/null
+          curl --fail --silent --show-error --retry 3 "${CLOUD_API_URL}/account-deletion" >/dev/null
       - name: Testar e gerar AAB assinado
         run: |
           gradle --no-daemon --no-configuration-cache --max-workers=2 :app:testDebugUnitTest :app:bundleRelease
