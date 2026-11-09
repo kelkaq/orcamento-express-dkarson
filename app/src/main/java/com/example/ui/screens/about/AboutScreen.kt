@@ -84,7 +84,7 @@ fun AboutScreen(
                         Text("Armazenamento principal: banco local no dispositivo (Room).")
                         Text("Nuvem: " + if (onlineConfigured) "servidor configurado; exige acesso e assinatura válida" else
                             "não configurada nesta compilação")
-                        Text("Entrar com Google ou e-mail é opcional para uso local. A recuperação em outro aparelho requer cópia de segurança.")
+                        Text("Não é obrigatório ter e-mail: crie uma conta com chave de recuperação. Guarde essa chave em segurança; sem ela não é possível recuperar uma conta desconectada.")
                         Text("Cada instalação tem um único espaço de trabalho local. Sair da conta não oculta nem apaga os dados deste celular.")
                         OutlinedButton(
                             onClick = onOpenAccount, modifier = Modifier.fillMaxWidth()

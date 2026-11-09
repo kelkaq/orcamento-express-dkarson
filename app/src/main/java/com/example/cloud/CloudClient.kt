@@ -23,6 +23,8 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
+data class PrivateCloudAccess(val label: String, val recoveryKey: String? = null)
+
 data class CloudSnapshot(
     val revision: Long,
     val exportDate: Long,
@@ -50,6 +52,45 @@ class CloudClient(private val context: Context) {
     }
 
     fun email(): String = prefs.getString("email", "").orEmpty()
+
+    /**
+     * Conta independente de e-mail, com chave de recuperação criptograficamente aleatória.
+     * O segredo aparece UMA VEZ; nunca é salvo em texto claro nas preferências.
+     */
+    suspend fun createPrivateAccount(): PrivateCloudAccess = withContext(Dispatchers.IO) {
+        check(prefs.getString("workspace_email", null).isNullOrBlank()) {
+            "Este aparelho já pertence a outra conta. Salve um backup antes de mudar."
+        }
+        val result = post("/v1/cloud/create-private-account", JSONObject(), authenticated = false)
+        val identity = "account:" + result.getString("accountId")
+        val label = result.getString("accountLabel")
+        storeToken(result.getString("token"))
+        rememberWorkspace(identity)
+        prefs.edit().putString("email", label).remove("revision").apply()
+        PrivateCloudAccess(label, result.getString("recoveryKey"))
+    }
+
+    suspend fun recoverPrivateAccount(recoveryKey: String): PrivateCloudAccess =
+        withContext(Dispatchers.IO) {
+            require(recoveryKey.trim().matches(Regex("[A-Za-z0-9_-]{43}"))) {
+                "Informe sua chave de recuperação completa (43 caracteres)."
+            }
+            val result = post("/v1/cloud/recover-private-account",
+                JSONObject().put("recoveryKey", recoveryKey.trim()), authenticated = false)
+            val identity = "account:" + result.getString("accountId")
+            requireCurrentWorkspace(identity)
+            storeToken(result.getString("token"))
+            rememberWorkspace(identity)
+            val label = result.getString("accountLabel")
+            prefs.edit().putString("email", label).remove("revision").apply()
+            PrivateCloudAccess(label)
+        }
+
+    suspend fun rotatePrivateKey(): PrivateCloudAccess = withContext(Dispatchers.IO) {
+        val result = post("/v1/cloud/rotate-recovery-key", JSONObject())
+        storeToken(result.getString("token"))
+        PrivateCloudAccess(email(), result.getString("recoveryKey"))
+    }
 
     /** Banco local é um único espaço por instalação: não misturar dados de contas. */
     private fun requireCurrentWorkspace(email: String) {
