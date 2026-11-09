@@ -20,11 +20,15 @@ android {
     versionName = "1.4"
 
     // Endpoint público HTTPS do verificador SEGURO, nunca credenciais Google no APK.
-    val verifyEndpoint = System.getenv("BILLING_VERIFY_URL").orEmpty().trim()
+    val verifyEndpoint = System.getenv("BILLING_VERIFY_URL")
+      ?.trim()?.takeIf { it.isNotEmpty() }
+      ?: "https://hajxpqnmeabyvfctlygp.supabase.co/functions/v1/orcamento-api/v1/play/verify"
     buildConfigField("String", "BILLING_VERIFY_URL",
       "\"" + verifyEndpoint.replace("\\", "\\\\").replace("\"", "\\\"") + "\"")
 
-    val cloudEndpoint = System.getenv("CLOUD_API_URL").orEmpty().trim()
+    val cloudEndpoint = System.getenv("CLOUD_API_URL")
+      ?.trim()?.takeIf { it.isNotEmpty() }
+      ?: "https://hajxpqnmeabyvfctlygp.supabase.co/functions/v1/orcamento-api"
     buildConfigField("String", "CLOUD_API_URL",
       "\"" + cloudEndpoint.replace("\\", "\\\\").replace("\"", "\\\"") + "\"")
 
