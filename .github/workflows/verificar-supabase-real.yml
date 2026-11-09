@@ -1,0 +1,22 @@
+name: E2E Supabase Real — acesso sem e-mail
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/acesso-sem-email-app-comercial-20261108
+permissions:
+  contents: read
+jobs:
+  verificar:
+    name: Criar, recuperar, proteger e excluir conta real
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUD_API_URL: https://hajxpqnmeabyvfctlygp.supabase.co/functions/v1/orcamento-api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Validar fluxo real com conta descartável
+        run: node scripts/verify-live-cloud.mjs
