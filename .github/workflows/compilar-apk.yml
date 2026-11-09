@@ -50,6 +50,16 @@ jobs:
       - name: Compilar APK de teste
         run: gradle --no-daemon --max-workers=2 :app:assembleDebug
 
+      - name: Reaproveitar framework Android 16 do Robolectric
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/robolectric-android16
+          key: robolectric-android16-13921718-i7-v1
+
+      - name: Preparar framework Robolectric em cache local
+        shell: bash
+        run: bash scripts/setup-robolectric-ci.sh
+
       - name: Rodar testes unitários
         shell: bash
         run: |

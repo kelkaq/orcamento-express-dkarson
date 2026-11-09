@@ -77,6 +77,16 @@ jobs:
           curl --fail --silent --show-error --retry 3 "${CLOUD_API_URL}/health" | grep '"ok":true'
           curl --fail --silent --show-error --retry 3 "${CLOUD_API_URL}/privacy" >/dev/null
           curl --fail --silent --show-error --retry 3 "${CLOUD_API_URL}/account-deletion" >/dev/null
+      - name: Reaproveitar framework Android 16 do Robolectric
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/robolectric-android16
+          key: robolectric-android16-13921718-i7-v1
+
+      - name: Preparar framework Robolectric em cache local
+        shell: bash
+        run: bash scripts/setup-robolectric-ci.sh
+
       - name: Testar e gerar AAB assinado
         run: |
           gradle --no-daemon --no-configuration-cache --max-workers=2 :app:testDebugUnitTest :app:bundleRelease
