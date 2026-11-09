@@ -15,7 +15,10 @@ import {webHtml,webJs,webCss} from './web.mjs';
 const host=Deno.env.get('SUPABASE_URL')||'';
 const secret=Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')||'';
 const anon=Deno.env.get('SUPABASE_ANON_KEY')||'';
-const publicBase=(Deno.env.get('PUBLIC_EDGE_BASE_URL')||'').replace(/\/$/,'');
+// Funciona imediatamente no domínio HTTPS fornecido pelo próprio projeto Supabase.
+const publicBase=(Deno.env.get('PUBLIC_EDGE_BASE_URL') ||
+  (host.startsWith('https://') ? host.replace(/\/$/,'')+'/functions/v1/orcamento-api' : '')
+).replace(/\/$/,'');
 const supportEmail=(Deno.env.get('SUPPORT_EMAIL')||'').trim();
 if(!host.startsWith('https://')||!secret||!anon||!publicBase.startsWith('https://'))
   throw new Error('Supabase URL e chaves de serviço não configuradas');
