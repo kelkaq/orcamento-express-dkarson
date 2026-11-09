@@ -100,3 +100,17 @@ jobs:
             IF public.oe_check_rate_limit('ci:test',2,60) THEN RAISE EXCEPTION 'Limite não aplicado'; END IF;
           END $$;
           SQL
+
+  integracao-real:
+    name: Verificar conta sem e-mail no Supabase real
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUD_API_URL: https://hajxpqnmeabyvfctlygp.supabase.co/functions/v1/orcamento-api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Criar, recuperar, restringir e excluir conta descartável
+        run: node scripts/verify-live-cloud.mjs
