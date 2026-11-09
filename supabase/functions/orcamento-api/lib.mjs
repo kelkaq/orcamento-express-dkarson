@@ -22,6 +22,10 @@ export function token() { return b64url(crypto.getRandomValues(new Uint8Array(32
 export async function sha256(value) {
   return b64url(await crypto.subtle.digest('SHA-256', bytes(value)));
 }
+/** Identidade sem e-mail: não use uma senha curta como código de recuperação. */
+export function isRecoveryKey(value) {
+  return typeof value==='string' && /^[A-Za-z0-9_-]{43}$/.test(value);
+}
 export function normalizeEmail(value) {
   if(typeof value!=='string')throw new Error('E-mail inválido');
   const email=value.trim().toLowerCase();

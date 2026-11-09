@@ -1,12 +1,23 @@
 import {b64url,fromB64url,bytes} from './lib.mjs';
+import {createClient} from 'npm:@supabase/supabase-js@2';
 
-/** AES-256-GCM secret never leaves Edge Functions. */
-async function aesKey() {
-  const value=Deno.env.get('OE_ENCRYPTION_KEY_BASE64');
-  if(!value)throw new Error('Chave de criptografia não configurada');
-  const key=Uint8Array.from(atob(value), x=>x.charCodeAt(0));
-  if(key.length!==32)throw new Error('Chave AES inválida');
-  return crypto.subtle.importKey('raw',key,{name:'AES-GCM'},false,['encrypt','decrypt']);
+// A chave de criptografia é aleatória e mantida em tabela privada; não é exposta no APK.
+// Ao restaurar backups completos do banco, manter a tabela oe_crypto_keys.
+let cachedKey: CryptoKey | null=null;
+async function aesKey(): Promise<CryptoKey> {
+  if(cachedKey) return cachedKey;
+  const host=Deno.env.get('SUPABASE_URL');
+  const secret=Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  if(!host||!secret)throw new Error('Configuração de proteção de dados indisponível');
+  const svc=createClient(host,secret,{auth:{persistSession:false,autoRefreshToken:false}});
+  const result=await svc.from('oe_crypto_keys').select('key_base64')
+    .eq('key_id','primary-v1').single();
+  if(result.error||!result.data?.key_base64)
+    throw new Error('Chave de proteção de dados indisponível');
+  const raw=Uint8Array.from(atob(result.data.key_base64),ch=>ch.charCodeAt(0));
+  if(raw.length!==32)throw new Error('Chave AES inválida');
+  cachedKey=await crypto.subtle.importKey('raw',raw,'AES-GCM',false,['encrypt','decrypt']);
+  return cachedKey;
 }
 export async function seal(plain: string): Promise<string> {
   const iv=crypto.getRandomValues(new Uint8Array(12));

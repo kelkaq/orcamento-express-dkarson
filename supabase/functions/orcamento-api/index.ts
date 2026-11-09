@@ -7,7 +7,7 @@
 import {createClient} from 'npm:@supabase/supabase-js@2';
 import {createRemoteJWKSet,jwtVerify} from 'npm:jose@6';
 import {normalizeEmail,token,sha256,subscriptionStatus,
-  validateBackup,validateQuote,parseRtdn,esc} from './lib.mjs';
+  validateBackup,validateQuote,parseRtdn,esc,isRecoveryKey} from './lib.mjs';
 import {seal,open} from './crypto.ts';
 import {verifyPurchase,productInfo} from './play.ts';
 import {webHtml,webJs,webCss} from './web.mjs';
@@ -156,6 +156,46 @@ async function requireOnline(user:any):Promise<void> {
   if(!verified.active)fail('Assinatura Pro Online inativa ou expirada',402);
 }
 async function cloud(req:Request,path:string):Promise<Response>{
+  // Fluxo sem e-mail ou OAuth: 256 bits gerados pelo servidor, só o hash fica armazenado.
+  if(req.method==='POST' && path==='/v1/cloud/create-private-account'){
+    await limit('key:create:'+await sha256(hostIp(req)),4,3600);
+    const uid=crypto.randomUUID();
+    const accessKey=token();
+    const email='account-'+uid+'@accounts.dkarson.invalid';
+    const created=await svc.from('oe_users').insert({id:uid,email})
+      .select('id,email').single();
+    const user=dataOrThrow(created.data,created.error);
+    const linked=await svc.from('oe_recovery_keys').insert({
+      user_id:uid,key_hash:await sha256(accessKey)
+    });
+    if(linked.error){
+      await svc.from('oe_users').delete().eq('id',uid);
+      dataOrThrow(null,linked.error);
+    }
+    const session=await createSession(user);
+    return json({
+      token:session,accountId:uid,accountLabel:'Conta DK-'+uid.substring(0,8),
+      recoveryKey:accessKey,expiresInDays:30
+    });
+  }
+  if(req.method==='POST' && path==='/v1/cloud/recover-private-account'){
+    await limit('key:recover:'+await sha256(hostIp(req)),15,300);
+    const input=await body(req,1024);
+    const key=String(input.recoveryKey||'').trim();
+    if(!isRecoveryKey(key))
+      fail('Chave de recuperação inválida',401);
+    const found=await svc.from('oe_recovery_keys').select('user_id')
+      .eq('key_hash',await sha256(key)).maybeSingle();
+    const credential=dataOrThrow(found.data,found.error);
+    if(!credential)fail('Chave de recuperação inválida',401);
+    const result=await svc.from('oe_users').select('id,email')
+      .eq('id',credential.user_id).single();
+    const user=dataOrThrow(result.data,result.error);
+    return json({
+      token:await createSession(user),accountId:user.id,
+      accountLabel:'Conta DK-'+user.id.substring(0,8),expiresInDays:30
+    });
+  }
   if(req.method==='POST' && path==='/v1/cloud/request-code'){
     const input=await body(req,2000),email=normalizeEmail(input.email);
     await limit('otp:email:'+(await sha256(email)),3,300);
@@ -193,6 +233,22 @@ async function cloud(req:Request,path:string):Promise<Response>{
     return json({token:await createSession(user),expiresInDays:30,email:user.email});
   }
   const user=await getUser(req);
+  if(req.method==='POST' && path==='/v1/cloud/rotate-recovery-key'){
+    const exists=await svc.from('oe_recovery_keys').select('user_id')
+      .eq('user_id',user.id).maybeSingle();
+    if(!dataOrThrow(exists.data,exists.error))
+      fail('Esta conta não usa uma chave de recuperação',400);
+    await limit('key:rotate:'+user.id,3,3600);
+    const newKey=token();
+    const change=await svc.from('oe_recovery_keys').update({
+      key_hash:await sha256(newKey),rotated_at:new Date().toISOString()
+    }).eq('user_id',user.id);
+    dataOrThrow(null,change.error);
+    const sessions=await svc.from('oe_sessions').delete().eq('user_id',user.id);
+    dataOrThrow(null,sessions.error);
+    const newSession=await createSession(user);
+    return json({token:newSession,recoveryKey:newKey});
+  }
   if(req.method==='POST' && path==='/v1/cloud/link-google'){
     await limit('link:google:'+user.id,6,60);
     const input=await body(req,10000);

@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {b64url,fromB64url,token,sha256,normalizeEmail,subscriptionStatus,
+import {b64url,fromB64url,token,sha256,normalizeEmail,isRecoveryKey,subscriptionStatus,
  validateBackup,validateQuote,parseRtdn,esc,parseJson} from './lib.mjs';
 
 test('base64url and session digests produce unique secrets',async()=>{
@@ -38,4 +38,12 @@ test('Pub/Sub envelope is scoped to app and product',()=>{
  assert.equal(parseRtdn(e('com.example.app','paid'),'com.example.app','paid').kind,'subscription');
  assert.equal(parseRtdn(e('another.app','paid'),'com.example.app','paid'),null);
  assert.throws(()=>parseRtdn({},'com.example.app','paid'));
+});
+
+test('recovery keys are strong 256-bit secrets, never short user passwords',()=>{
+  const key=token();
+  assert.equal(isRecoveryKey(key),true);
+  assert.equal(key.length,43);
+  assert.equal(isRecoveryKey('123456'),false);
+  assert.equal(isRecoveryKey('password@example.com'),false);
 });
