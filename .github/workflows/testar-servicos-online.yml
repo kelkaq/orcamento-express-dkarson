@@ -77,11 +77,21 @@ jobs:
           SQL
           psql -v ON_ERROR_STOP=1 -f supabase/migrations/20261108210000_orcamento_express.sql
           psql -v ON_ERROR_STOP=1 -f supabase/migrations/20261108210000_orcamento_express.sql
+          psql -v ON_ERROR_STOP=1 -f supabase/migrations/20261109004500_private_account_crypto.sql
+          psql -v ON_ERROR_STOP=1 -f supabase/migrations/20261109004500_private_account_crypto.sql
           psql -v ON_ERROR_STOP=1 <<'SQL'
           DO $$
           BEGIN
             IF NOT (SELECT relrowsecurity FROM pg_class WHERE relname='oe_users' AND relnamespace='public'::regnamespace)
                THEN RAISE EXCEPTION 'RLS não habilitado'; END IF;
+            IF NOT (SELECT relrowsecurity FROM pg_class WHERE relname='oe_recovery_keys' AND relnamespace='public'::regnamespace)
+               OR NOT (SELECT relrowsecurity FROM pg_class WHERE relname='oe_crypto_keys' AND relnamespace='public'::regnamespace)
+               THEN RAISE EXCEPTION 'RLS de chaves não habilitado'; END IF;
+            IF has_table_privilege('anon','public.oe_recovery_keys','SELECT')
+               OR has_table_privilege('authenticated','public.oe_crypto_keys','SELECT')
+               THEN RAISE EXCEPTION 'Acesso indevido às chaves'; END IF;
+            IF (SELECT count(*) FROM public.oe_crypto_keys WHERE key_id='primary-v1')<>1
+               THEN RAISE EXCEPTION 'Chave primária ausente ou duplicada'; END IF;
             IF has_table_privilege('anon','public.oe_users','SELECT')
                OR has_table_privilege('authenticated','public.oe_backups','SELECT')
                THEN RAISE EXCEPTION 'Dados expostos a clientes'; END IF;
