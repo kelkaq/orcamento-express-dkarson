@@ -187,10 +187,11 @@ async function cloud(req:Request,path:string):Promise<Response>{
     const found=await svc.from('oe_recovery_keys').select('user_id')
       .eq('key_hash',await sha256(key)).maybeSingle();
     const credential=dataOrThrow(found.data,found.error);
-    if(!credential)fail('Chave de recuperação inválida',401);
+    if(!credential)throw new ApiError('Chave de recuperação inválida',401);
     const result=await svc.from('oe_users').select('id,email')
       .eq('id',credential.user_id).single();
     const user=dataOrThrow(result.data,result.error);
+    if(!user)throw new ApiError('Conta não encontrada',401);
     return json({
       token:await createSession(user),accountId:user.id,
       accountLabel:'Conta DK-'+user.id.substring(0,8),expiresInDays:30
@@ -484,7 +485,11 @@ function informationPage(title:string,content:string):Response {
 }
 const privacyText='<p>O Orçamento Express armazena orçamentos, clientes e documentos no aparelho. '+
   'Quando você utiliza o Pro Online, guarda uma cópia dos dados, histórico de autorizações, '+
-  'e-mail, registro da licença e sessão em infraestrutura Supabase protegida.</p>'+
+  'identificador de conta, registro da licença e sessão em infraestrutura Supabase protegida.</p>'+
+  '<p>É possível criar conta sem e-mail: uma chave aleatória de recuperação, exibida uma única vez, '+
+  'permite reabrir o acesso em outro aparelho. O servidor armazena somente o hash desta chave. '+
+  'Se você perder a chave e não mantiver uma sessão aberta, não poderemos recuperar seu acesso.</p>'+
+  '<p>E-mail é tratado somente quando o usuário opta por acessar via identidade Google ou por e-mail.</p>'+
   '<p>A Google Play processa compras e assinaturas. Os documentos compartilhados por você '+
   'podem ser enviados a serviços de terceiros, como WhatsApp ou e-mail.</p>'+
   '<p>Você pode exportar seus dados no próprio aplicativo e solicitar a exclusão da conta online '+
@@ -507,7 +512,7 @@ Deno.serve(async (req:Request):Promise<Response>=>{
       return informationPage('Política de privacidade — Orçamento Express',privacyText);
     if(route==='/account-deletion' && req.method==='GET')
       return informationPage('Exclusão de conta — Orçamento Express',
-        '<p>Você pode solicitar exclusão pela <a href="'+esc(publicBase)+'/app">Central Online</a>: entre com código no e-mail, clique em Excluir conta online e confirme. Também é possível pelo aplicativo em Empresa → Minha conta → Excluir.</p>'+
+        '<p>Você pode solicitar exclusão pela <a href="'+esc(publicBase)+'/app">Central Online</a>: entre com sua chave de recuperação, clique em Excluir conta online e confirme. Também é possível pelo aplicativo em Empresa → Minha conta → Excluir.</p>'+
         '<p>São excluídos a conta, as sessões, os backups e as aprovações salvas na nuvem. Não são apagados os dados do celular.</p>'+
         '<p>Cancelamentos de assinatura são gerenciados diretamente pela Google Play.</p>');
     if(route.startsWith('/a/'))return await approval(req,route);
